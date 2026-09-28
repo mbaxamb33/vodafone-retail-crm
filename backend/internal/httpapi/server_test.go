@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -246,5 +248,55 @@ func TestManagerWorkflow(t *testing.T) {
 	emp.do("GET", "customers/"+c.ID, nil, &profile)
 	if len(profile.Audit) != 0 || len(profile.OwnershipHistory) != 2 {
 		t.Fatal("employees see ownership history but not the audit log")
+	}
+}
+
+func TestStaticFrontendAndProxiedClientIP(t *testing.T) {
+	db := pgtest.New(t)
+	a := pgtest.FastAuth(db)
+	st := pgtest.NewStore(t, db, a, "Static Store")
+	dir := t.TempDir()
+	must := func(err error) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>app"), 0o600))
+	must(os.MkdirAll(filepath.Join(dir, "assets"), 0o700))
+	must(os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("js"), 0o600))
+	h := httpapi.New(crm.NewService(db), a, httpapi.Config{AppOrigin: origin, SessionTTL: time.Hour, StaticDir: dir, TrustProxy: true}, slog.New(slog.NewTextHandler(io.Discard, nil)), db.Ping).Handler()
+	get := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		return w
+	}
+	if w := get("/customers/abc"); w.Code != 200 || !strings.Contains(w.Body.String(), "app") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'self'") {
+		t.Fatal("client route should serve index.html with the page CSP", w.Code)
+	}
+	if w := get("/assets/app.js"); w.Code != 200 || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
+		t.Fatal("hashed assets should be cacheable")
+	}
+	if w := get("/../../etc/passwd"); strings.Contains(w.Body.String(), "root:") {
+		t.Fatal("path traversal")
+	}
+	if w := get("/api/v1/unknown"); w.Code != 401 && w.Code != 404 {
+		t.Fatal("api paths must not fall back to index.html", w.Code)
+	}
+	// Failures from one forwarded client must not lock out others behind the same proxy.
+	login := func(ip, password string) int {
+		r := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"email":"`+st.Ioana.Email+`","password":"`+password+`"}`))
+		r.Header.Set("Origin", origin)
+		r.Header.Set("X-Forwarded-For", ip)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for i := 0; i < 30; i++ {
+		login("203.0.113.9", "wrong")
+	}
+	var ip string
+	must(db.Pool.QueryRow(context.Background(), `SELECT client_ip FROM login_attempts ORDER BY id DESC LIMIT 1`).Scan(&ip))
+	if ip != "203.0.113.9" {
+		t.Fatalf("recorded ip %q", ip)
 	}
 }

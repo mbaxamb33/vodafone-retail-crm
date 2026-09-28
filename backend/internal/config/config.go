@@ -20,6 +20,8 @@ type Config struct {
 	SessionTTL  time.Duration
 	LogLevel    slog.Level
 	Features    []string
+	StaticDir   string
+	TrustProxy  bool
 }
 
 func get(key, def string) string {
@@ -43,7 +45,11 @@ func Load() (Config, error) {
 	if c.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
 	}
+	c.StaticDir = os.Getenv("STATIC_DIR")
 	var err error
+	if c.TrustProxy, err = strconv.ParseBool(get("TRUST_PROXY", "false")); err != nil {
+		errs = append(errs, errors.New("TRUST_PROXY must be true or false"))
+	}
 	if c.AutoMigrate, err = strconv.ParseBool(get("AUTO_MIGRATE", "true")); err != nil {
 		errs = append(errs, errors.New("AUTO_MIGRATE must be true or false"))
 	}

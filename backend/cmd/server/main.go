@@ -51,7 +51,7 @@ func run() error {
 
 	authCfg := auth.DefaultConfig()
 	authCfg.SessionTTL = cfg.SessionTTL
-	api := httpapi.New(crm.NewService(db), auth.NewService(db, authCfg), httpapi.Config{AppOrigin: cfg.AppOrigin, SessionTTL: cfg.SessionTTL, Features: cfg.Features}, log, db.Ping)
+	api := httpapi.New(crm.NewService(db), auth.NewService(db, authCfg), httpapi.Config{AppOrigin: cfg.AppOrigin, SessionTTL: cfg.SessionTTL, Features: cfg.Features, StaticDir: cfg.StaticDir, TrustProxy: cfg.TrustProxy}, log, db.Ping)
 	srv := &http.Server{
 		Addr: cfg.ListenAddr, Handler: api.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,

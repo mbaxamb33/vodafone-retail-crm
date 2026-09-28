@@ -35,6 +35,7 @@ jobs:
       - run: make lint
       - run: make test
       - run: make build
+      - run: docker build -t vodafone-crm:ci .
       - uses: actions/upload-artifact@v4
         with:
           name: build

@@ -7,7 +7,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"vodafone/store/internal/apperr"
@@ -67,12 +71,39 @@ func (s *Server) observe(next http.Handler) http.Handler {
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Cache-Control", "no-store")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" || r.URL.Path == "/ready" {
+			h.Set("Cache-Control", "no-store")
+			h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		} else {
+			h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// staticFiles serves the built frontend. Unknown paths get index.html so client-side routes
+// such as /customers/{id} load directly; hashed assets are cached long-term.
+func staticFiles(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		p := path.Clean("/" + r.URL.Path)
+		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err != nil || info.IsDir() {
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+			return
+		}
+		if strings.HasPrefix(p, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		files.ServeHTTP(w, r)
 	})
 }
 
@@ -116,7 +147,13 @@ func currentUser(r *http.Request) crm.User {
 	return u
 }
 
-func clientIP(r *http.Request) string {
+func (s *Server) clientIP(r *http.Request) string {
+	if s.cfg.TrustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			return strings.TrimSpace(parts[len(parts)-1])
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

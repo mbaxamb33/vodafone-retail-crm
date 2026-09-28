@@ -20,6 +20,11 @@ type Config struct {
 	AppOrigin  string
 	SessionTTL time.Duration
 	Features   []string
+	// StaticDir, when set, serves the built frontend with index.html as the SPA fallback.
+	StaticDir string
+	// TrustProxy takes the client IP from the last X-Forwarded-For entry, which the
+	// reverse proxy in front of the server sets. Enable only behind such a proxy.
+	TrustProxy bool
 }
 
 type Server struct {
@@ -81,6 +86,9 @@ func (s *Server) Handler() http.Handler {
 	api("POST /notifications/read", s.readNotifications)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, r, apperr.ErrNotFound) })
+	if s.cfg.StaticDir != "" {
+		mux.Handle("/", staticFiles(s.cfg.StaticDir))
+	}
 	return s.observe(securityHeaders(mux))
 }
 
@@ -141,7 +149,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	session, err := s.auth.Login(r.Context(), in.Email, in.Password, clientIP(r))
+	session, err := s.auth.Login(r.Context(), in.Email, in.Password, s.clientIP(r))
 	if err != nil {
 		writeError(w, r, err)
 		return

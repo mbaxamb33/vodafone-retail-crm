@@ -57,6 +57,23 @@ Signed-in users can change their own password with `POST /api/v1/auth/password`.
 
 Secrets belong in the environment, never in the repository. The credentials in `docker-compose.yml` are for the disposable local container only.
 
+## Production deployment
+
+One server runs `deploy/compose.yml`: Caddy (automatic HTTPS certificates), the app image (API plus built frontend) and PostgreSQL. The server keeps `~/crm/.env`, which must never be committed:
+
+```sh
+DOMAIN=crm.example.com
+POSTGRES_PASSWORD=<long random value>
+```
+
+Deploy from a machine with Docker: `deploy/deploy.sh ubuntu@<server-ip> <ssh-key>`. It builds the image, copies it over SSH and restarts the stack; migrations run on start. `deploy/backup.sh` runs nightly from cron and keeps 14 days of `pg_dump` files in `~/crm/backups`. Run administration commands inside the app container, for example:
+
+```sh
+sudo docker compose exec app crmctl reset-password -email ana@example.com
+```
+
+Point the domain's DNS `A` record at the server's static IP before the first start, so Caddy can obtain the certificate.
+
 ## Architecture
 
 ```
