@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { workspaceSchema, type User } from "../domain";
 import Manager from "./manager/Manager";
 import Team from "./manager/Team";
@@ -14,7 +14,10 @@ import CreateCustomer from "./customers/CreateCustomer";
 import OwnershipEditor from "./customers/OwnershipEditor";
 import FollowUpForm from "./followups/FollowUpForm";
 
-vi.mock("../api", () => ({ api: vi.fn() }));
+vi.mock("../api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api")>()),
+  api: vi.fn(),
+}));
 const manager: User = {
   id: "m",
   name: "Manager Demo",
@@ -73,15 +76,61 @@ function dialogs() {
     },
   });
 }
+const employeeReport = {
+  employeeId: "e",
+  name: "Consultant Demo",
+  role: "employee",
+  visits: 0,
+  customersHandled: 0,
+  newCustomers: 0,
+  opportunitiesCreated: 0,
+  offers: 0,
+  contracts: 0,
+  portfolioCustomers: 1,
+  activeOpportunities: 0,
+  openFollowUps: 0,
+  overdueFollowUps: 0,
+};
+const report = {
+  from: "",
+  to: "",
+  summary: {
+    visits: 0,
+    customersHandled: 0,
+    newCustomers: 0,
+    opportunitiesCreated: 0,
+    offers: 0,
+    contracts: 0,
+    lost: 0,
+    poolCustomers: 0,
+    activeOpportunities: 0,
+    followUpsDueToday: 0,
+    overdueFollowUps: 0,
+  },
+  funnel: [{ step: -1, label: "Vizite în magazin", count: 0, rate: 1 }],
+  stepIncidence: [{ step: 0, label: "Welcome", count: 0 }],
+  employees: [employeeReport],
+};
+// Routes mocked API calls by path, as the manager screens load several resources.
+function mockManagerApi() {
+  vi.mocked(api).mockImplementation(async (path: string) => {
+    if (path.startsWith("manager/dashboard")) return report;
+    if (path.startsWith("manager/employees/"))
+      return {
+        items: [],
+        total: 0,
+        offset: 0,
+        limit: 100,
+        summary: employeeReport,
+      };
+    if (path.startsWith("customers?"))
+      return { items: data.customers, total: 1, offset: 0, limit: 24 };
+    throw new Error("unexpected " + path);
+  });
+}
 describe("retail workflows", () => {
   it("gives the overview and team different jobs", async () => {
-    vi.mocked(api).mockResolvedValue({
-      visits: [],
-      events: [],
-      newCustomers: [],
-      from: "",
-      to: "",
-    });
+    mockManagerApi();
     const view = mount(<Manager data={data} onOpen={vi.fn()} />);
     expect(
       screen.getByRole("heading", { name: "Ce are nevoie de atenția ta?" }),
@@ -91,12 +140,19 @@ describe("retail workflows", () => {
     ).toBeTruthy();
     await screen.findByRole("heading", { name: "Pași parcurși în vizite" });
     expect(screen.queryByRole("button", { name: "Reasignează" })).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: /Consultant Demo/ })
+        .getAttribute("href"),
+    ).toBe("/team?employee=e");
     view.unmount();
     mount(<Team data={data} user={manager} onOpen={vi.fn()} />);
     expect(
       screen.getByRole("heading", { name: "Oamenii din spatele relațiilor." }),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reasignează" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: "Reasignează" }),
+    ).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Activitate" }));
     await screen.findByText(/0 vizite/);
     expect(
@@ -105,7 +161,15 @@ describe("retail workflows", () => {
   });
   it("records a colleague visit without claiming ownership", async () => {
     dialogs();
-    vi.mocked(api).mockResolvedValue({ ok: true });
+    vi.mocked(api).mockImplementation(async (path: string) =>
+      path === "catalog"
+        ? {
+            visitReasons: [{ code: "support", label: "Service / suport" }],
+            nextActions: [],
+            productCategories: [],
+          }
+        : { ok: true },
+    );
     const saved = vi.fn();
     mount(
       <VisitForm
@@ -124,7 +188,12 @@ describe("retail workflows", () => {
     await waitFor(() => expect(saved).toHaveBeenCalledOnce());
     expect(api).toHaveBeenCalledWith(
       "customers/c/visits",
-      expect.objectContaining({ ownership: "keep", steps: [0, 5] }),
+      expect.objectContaining({
+        ownership: "keep",
+        steps: [0, 5],
+        reasonCode: "support",
+        opportunities: [],
+      }),
     );
   });
   it("prefills the searched phone when creating a customer", () => {
@@ -143,6 +212,38 @@ describe("retail workflows", () => {
         }) as HTMLInputElement
       ).value,
     ).toBe("0722 000 999");
+  });
+  it("shows server validation next to the field", async () => {
+    dialogs();
+    vi.mocked(api).mockRejectedValue(
+      new ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "Verifică datele introduse.",
+        "r",
+        {
+          phone: "Introdu un număr de telefon valid.",
+        },
+      ),
+    );
+    mount(
+      <CreateCustomer
+        initialPhone="0000 0000"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Nume client" }),
+      "Client Test",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Adaugă clientul" }),
+    );
+    expect(
+      await screen.findByText("Introdu un număr de telefon valid."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Verifică datele introduse.")).toBeNull();
   });
   it("keeps a rejected ownership change editable and shows the error", async () => {
     vi.mocked(api).mockRejectedValue(new Error("Nu ai permisiunea necesară."));

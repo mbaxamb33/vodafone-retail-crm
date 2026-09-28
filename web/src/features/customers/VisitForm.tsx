@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { Avatar, Modal } from "../../components/ui";
-import { api } from "../../api";
+import { api, ApiError } from "../../api";
+import { useCatalog } from "../../hooks";
 import { steps, today, type Customer, type User } from "../../domain";
 export default function VisitForm({
   customer,
@@ -21,22 +22,28 @@ export default function VisitForm({
   const [ownership, setOwnership] = useState("keep");
   const [action, setAction] = useState("");
   const [due, setDue] = useState(today());
-  const [reason, setReason] = useState("Service / suport");
+  const [reason, setReason] = useState("support");
   const [notes, setNotes] = useState("");
   const [product, setProduct] = useState("");
+  const [category, setCategory] = useState("");
+  const catalog = useCatalog();
   const save = useMutation({
     mutationFn: () =>
       api("customers/" + customer.id + "/visits", {
-        reason,
+        reasonCode: reason,
         steps: selected,
         notes,
         ownership,
         nextAction: action,
-        due,
-        product,
+        due: action ? due : "",
+        opportunities: product.trim()
+          ? [{ product: product.trim(), category }]
+          : [],
       }),
     onSuccess: onSaved,
   });
+  const fieldError = (f: string) =>
+    save.error instanceof ApiError ? save.error.fields[f] : undefined;
   return (
     <Modal title="O conversație de ținut minte." onClose={onClose}>
       <div className="visit-customer">
@@ -82,20 +89,11 @@ export default function VisitForm({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
         >
-          {[
-            "Service / suport",
-            "Factură",
-            "Abonament nou",
-            "Reînnoire abonament",
-            "Telefon mobil",
-            "Internet",
-            "TV",
-            "Accesorii",
-            "Întrebare despre contract",
-            "Problemă tehnică",
-            "Altele",
-          ].map((r) => (
-            <option key={r}>{r}</option>
+          <option value="">Fără motiv anume</option>
+          {catalog.data?.visitReasons.map((r) => (
+            <option key={r.code} value={r.code}>
+              {r.label}
+            </option>
           ))}
         </select>
         <label>Ce pași ai realizat?</label>
@@ -132,15 +130,10 @@ export default function VisitForm({
               onChange={(e) => setAction(e.target.value)}
             >
               <option value="">Fără acțiune</option>
-              {[
-                "Sună clientul",
-                "Clientul revine",
-                "Verifică eligibilitatea",
-                "Pregătește oferta",
-                "Discută reînnoirea",
-                "Așteptăm clientul",
-              ].map((a) => (
-                <option key={a}>{a}</option>
+              {catalog.data?.nextActions.map((a) => (
+                <option key={a.code} value={a.label}>
+                  {a.label}
+                </option>
               ))}
             </select>
           </div>
@@ -154,6 +147,9 @@ export default function VisitForm({
                 value={due}
                 onChange={(e) => setDue(e.target.value)}
               />
+              {fieldError("due") && (
+                <p className="error">{fieldError("due")}</p>
+              )}
             </div>
           )}
         </div>
@@ -167,6 +163,20 @@ export default function VisitForm({
           value={product}
           onChange={(e) => setProduct(e.target.value)}
         />
+        {product.trim() && (
+          <select
+            aria-label="Categoria oportunității"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            <option value="">Fără categorie</option>
+            {catalog.data?.productCategories.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        )}
         <label htmlFor="notes">
           Ce ar trebui să ținem minte?{" "}
           <span className="optional">opțional</span>

@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ArrowRight } from "lucide-react";
 import { Modal } from "../../components/ui";
-import { api } from "../../api";
+import { api, ApiError } from "../../api";
 import { customerSchema, type Customer } from "../../domain";
 const createSchema = z.object({
   name: z.string().trim().min(2, "Introdu cel puțin două caractere.").max(120),
@@ -31,6 +31,13 @@ export default function CreateCustomer({
     mutationFn: (values: z.infer<typeof createSchema>) =>
       api("customers", values),
     onSuccess: (v) => onSaved(customerSchema.parse(v)),
+    onError: (e) => {
+      // Show server validation next to the matching field.
+      if (e instanceof ApiError)
+        for (const field of ["name", "phone"] as const)
+          if (e.fields[field])
+            form.setError(field, { message: e.fields[field] });
+    },
   });
   return (
     <Modal title="O relație nouă începe aici." onClose={onClose}>
@@ -61,11 +68,15 @@ export default function CreateCustomer({
           Poți folosi și formatul +40. Numerele comune sunt permise; verifică
           profilurile existente înainte de a crea unul nou.
         </p>
-        {save.error && (
-          <p className="error" role="alert">
-            {save.error.message}
-          </p>
-        )}
+        {save.error &&
+          !(
+            save.error instanceof ApiError &&
+            save.error.code === "VALIDATION_FAILED"
+          ) && (
+            <p className="error" role="alert">
+              {save.error.message}
+            </p>
+          )}
         <button className="button primary full" disabled={save.isPending}>
           {save.isPending ? "Se salvează…" : "Adaugă clientul"}
           <ArrowRight size={18} />

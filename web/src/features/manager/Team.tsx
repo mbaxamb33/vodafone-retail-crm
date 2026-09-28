@@ -15,7 +15,8 @@ import {
 } from "../../domain";
 import OwnershipEditor from "../customers/OwnershipEditor";
 import FollowUpForm from "../followups/FollowUpForm";
-import { useStoreReport } from "./reporting";
+import { useEmployeeActivity, useStoreReport } from "./reporting";
+import { useCustomerPages } from "../../hooks";
 export default function Team({
   data,
   user,
@@ -31,18 +32,27 @@ export default function Team({
   );
   const [task, setTask] = useState<FollowUp | null>(null);
   const [tab, setTab] = useState("portfolio");
-  const { query: q, controls, valid } = useStoreReport();
+  const { query: q, controls, valid, start, end } = useStoreReport();
   const members = data.users;
   const id = params.get("employee") ?? members[0]?.id;
   const employee = members.find((u) => u.id === id);
-  const customers = data.customers.filter((c) => c.ownerId === id);
+  const portfolio = useCustomerPages({ owner: id ?? "", sort: "name" });
+  const customers = portfolio.data?.pages.flatMap((p) => p.items) ?? [];
+  const activity = useEmployeeActivity(
+    id,
+    start,
+    end,
+    tab === "activity" && valid,
+  );
+  const reportFor = (userId: string) =>
+    q.data?.employees.find((e) => e.employeeId === userId);
   const opportunities = data.opportunities.filter(
     (o) => o.employeeId === id && activeOpportunity(o),
   );
   const tasks = data.followUps
     .filter((f) => f.employeeId === id && f.status !== "done")
     .sort((a, b) => a.due.localeCompare(b.due));
-  const visits = q.data?.visits.filter((v) => v.employeeId === id) ?? [];
+  const visits = activity.data?.items ?? [];
   return (
     <>
       <div className="page-heading">
@@ -80,11 +90,7 @@ export default function Team({
                   <strong>{member.name}</strong>
                   <small>
                     {member.role === "manager" ? "Manager" : "Consultant"} ·{" "}
-                    {
-                      data.customers.filter((c) => c.ownerId === member.id)
-                        .length
-                    }{" "}
-                    clienți
+                    {reportFor(member.id)?.portfolioCustomers ?? "…"} clienți
                   </small>
                   <small className={late ? "needs-attention" : ""}>
                     {late
@@ -116,7 +122,7 @@ export default function Team({
                 </div>
                 <div className="employee-metrics">
                   <div>
-                    <strong>{customers.length}</strong>
+                    <strong>{portfolio.data?.pages[0]?.total ?? "…"}</strong>
                     <span>Clienți alocați</span>
                   </div>
                   <div>
@@ -175,16 +181,24 @@ export default function Team({
                       </button>
                     </div>
                   ))}
-                  {!customers.length && (
+                  {portfolio.isSuccess && !customers.length && (
                     <Empty>Acest coleg nu are clienți alocați.</Empty>
+                  )}
+                  {portfolio.hasNextPage && (
+                    <button
+                      className="button"
+                      disabled={portfolio.isFetchingNextPage}
+                      onClick={() => portfolio.fetchNextPage()}
+                    >
+                      Arată mai mulți
+                    </button>
                   )}
                   {selectedCustomer && (
                     <OwnershipEditor
                       key={selectedCustomer.id}
                       customer={
-                        data.customers.find(
-                          (c) => c.id === selectedCustomer.id,
-                        ) ?? selectedCustomer
+                        customers.find((c) => c.id === selectedCustomer.id) ??
+                        selectedCustomer
                       }
                       user={user}
                       users={members}
@@ -258,25 +272,25 @@ export default function Team({
                     <h2>Activitate înregistrată</h2>
                     {controls}
                   </div>
-                  {!valid ? null : q.isPending ? (
+                  {!valid ? null : activity.isPending ? (
                     <p>Se încarcă activitatea…</p>
-                  ) : q.error ? (
+                  ) : activity.error ? (
                     <p role="alert" className="error">
-                      {q.error.message}
+                      {activity.error.message}
                     </p>
                   ) : (
                     <>
                       <p className="activity-summary">
-                        {visits.length} vizite ·{" "}
-                        {q.data?.events.filter(
-                          (e) => e.employeeId === id && e.stage === "offer",
-                        ).length ?? 0}{" "}
-                        treceri la ofertă ·{" "}
-                        {q.data?.events.filter(
-                          (e) => e.employeeId === id && e.stage === "won",
-                        ).length ?? 0}{" "}
-                        câștiguri în interval
+                        {activity.data.summary.visits} vizite ·{" "}
+                        {activity.data.summary.offers} treceri la ofertă ·{" "}
+                        {activity.data.summary.contracts} câștiguri în interval
                       </p>
+                      {activity.data.total > visits.length && (
+                        <p className="form-hint">
+                          Ultimele {visits.length} din {activity.data.total}{" "}
+                          vizite.
+                        </p>
+                      )}
                       {[...visits]
                         .sort((a, b) => b.at.localeCompare(a.at))
                         .map((v) => (
@@ -289,7 +303,7 @@ export default function Team({
                             <span>
                               <strong>
                                 {
-                                  data.customers.find(
+                                  activity.data.customers.find(
                                     (c) => c.id === v.customerId,
                                   )?.name
                                 }

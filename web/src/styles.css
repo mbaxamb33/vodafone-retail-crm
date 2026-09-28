@@ -3126,3 +3126,79 @@ label {
     font-size: 10px;
   }
 }
+.notifications {
+  position: relative;
+}
+.notifications > .icon-button {
+  position: relative;
+}
+.notifications > .icon-button > .nav-count {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  margin: 0;
+}
+.notifications-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: min(360px, calc(100vw - 32px));
+  max-height: 420px;
+  overflow: auto;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgb(20 20 30 / 14%);
+  padding: 16px;
+  z-index: 30;
+}
+.notifications-panel > .section-heading {
+  margin-bottom: 8px;
+}
+.notification-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 8px;
+  border-radius: 10px;
+  text-align: left;
+}
+.notification-row:hover {
+  background: #f7f7f9;
+}
+.notification-row > span:not(.red-dot) {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+}
+.notification-row small {
+  color: var(--muted);
+}
+.notification-row time {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.notification-row.unread strong {
+  color: #111;
+}
+.ownership-history {
+  list-style: none;
+  margin: 0;
+  padding: 14px 24px 20px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.ownership-history li {
+  display: flex;
+  gap: 10px;
+}
+.ownership-history time {
+  color: var(--muted);
+  min-width: 56px;
+}
+.login-card form {
+  display: grid;
+}

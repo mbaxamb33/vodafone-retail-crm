@@ -12,9 +12,12 @@ export const customerSchema = z.object({
   storeId: z.string(),
   ownerId: z.string(),
   ownership: z.enum(["owned", "pool", "unassigned"]),
+  status: z.enum(["active", "archived", "anonymized"]).default("active"),
   tags: z.array(z.string()),
   createdAt: z.string(),
   updatedAt: z.string(),
+  lastInteractionAt: z.string().nullish(),
+  nextFollowUpDue: z.string().optional(),
 });
 export const visitSchema = z.object({
   id: z.string(),
@@ -22,8 +25,11 @@ export const visitSchema = z.object({
   employeeId: z.string(),
   at: z.string(),
   reason: z.string(),
+  reasonCode: z.string().optional(),
   steps: z.array(z.number()),
+  furthestStep: z.number().optional(),
   notes: z.string(),
+  notesEditedAt: z.string().optional(),
 });
 export const followUpSchema = z.object({
   id: z.string(),
@@ -33,6 +39,7 @@ export const followUpSchema = z.object({
   due: z.string(),
   status: z.enum(["open", "waiting", "unreachable", "done"]),
   opportunityId: z.string().optional(),
+  notes: z.string().optional(),
   completedAt: z.string().optional(),
 });
 export const opportunitySchema = z.object({
@@ -40,15 +47,36 @@ export const opportunitySchema = z.object({
   customerId: z.string(),
   employeeId: z.string(),
   product: z.string(),
+  category: z.string().optional(),
   stage: z.string(),
+  estimatedValue: z.number().nullish(),
+  notes: z.string().optional(),
   createdAt: z.string(),
-  updatedAt: z.string().optional(),
+  stageChangedAt: z.string().optional(),
+  closedAt: z.string().optional(),
 });
 export const workspaceSchema = z.object({
   users: z.array(userSchema),
   customers: z.array(customerSchema),
   followUps: z.array(followUpSchema),
   opportunities: z.array(opportunitySchema),
+  today: z.string().optional(),
+});
+export const pageSchema = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({
+    items: z.array(item),
+    total: z.number(),
+    offset: z.number(),
+    limit: z.number(),
+  });
+export const customerPageSchema = pageSchema(customerSchema);
+const auditSchema = z.object({
+  id: z.string(),
+  actorId: z.string(),
+  action: z.string(),
+  at: z.string(),
+  detail: z.string(),
+  data: z.record(z.string(), z.unknown()).nullish(),
 });
 export const profileSchema = z.object({
   customer: customerSchema,
@@ -57,34 +85,86 @@ export const profileSchema = z.object({
   total: z.number(),
   followUps: z.array(followUpSchema),
   opportunities: z.array(opportunitySchema),
-  audit: z.array(
-    z.object({
-      id: z.string(),
-      actorId: z.string(),
-      action: z.string(),
-      at: z.string(),
-      detail: z.string(),
-    }),
-  ),
+  ownershipHistory: z.array(auditSchema).default([]),
+  audit: z.array(auditSchema),
+});
+export const meSchema = z.object({
+  user: userSchema,
+  store: z.object({ id: z.string(), name: z.string(), timezone: z.string() }),
+  features: z.array(z.string()),
+});
+const catalogItem = z.object({ code: z.string(), label: z.string() });
+export const catalogSchema = z.object({
+  visitReasons: z.array(catalogItem),
+  nextActions: z.array(catalogItem),
+  productCategories: z.array(catalogItem),
+});
+const employeeReportSchema = z.object({
+  employeeId: z.string(),
+  name: z.string(),
+  role: z.string(),
+  visits: z.number(),
+  customersHandled: z.number(),
+  newCustomers: z.number(),
+  opportunitiesCreated: z.number(),
+  offers: z.number(),
+  contracts: z.number(),
+  portfolioCustomers: z.number(),
+  activeOpportunities: z.number(),
+  openFollowUps: z.number(),
+  overdueFollowUps: z.number(),
 });
 export const reportSchema = z.object({
-  visits: z.array(visitSchema),
-  newCustomers: z.array(customerSchema),
-  events: z.array(
-    z.object({
-      id: z.string(),
-      customerId: z.string(),
-      employeeId: z.string(),
-      stage: z.string(),
-      at: z.string(),
-    }),
-  ),
   from: z.string(),
   to: z.string(),
+  summary: z.object({
+    visits: z.number(),
+    customersHandled: z.number(),
+    newCustomers: z.number(),
+    opportunitiesCreated: z.number(),
+    offers: z.number(),
+    contracts: z.number(),
+    lost: z.number(),
+    poolCustomers: z.number(),
+    activeOpportunities: z.number(),
+    followUpsDueToday: z.number(),
+    overdueFollowUps: z.number(),
+  }),
+  funnel: z.array(
+    z.object({
+      step: z.number(),
+      label: z.string(),
+      count: z.number(),
+      rate: z.number(),
+    }),
+  ),
+  stepIncidence: z.array(
+    z.object({ step: z.number(), label: z.string(), count: z.number() }),
+  ),
+  employees: z.array(employeeReportSchema),
+});
+export const activitySchema = pageSchema(visitSchema).extend({
+  summary: employeeReportSchema,
+  customers: z.array(customerSchema).default([]),
+});
+export const notificationsSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.string(),
+      customerId: z.string().optional(),
+      customerName: z.string().optional(),
+      message: z.string(),
+      createdAt: z.string(),
+      readAt: z.string().optional(),
+    }),
+  ),
+  unread: z.number(),
 });
 export type FollowUp = z.infer<typeof followUpSchema>;
 export type Opportunity = z.infer<typeof opportunitySchema>;
 export type Report = z.infer<typeof reportSchema>;
+export type Catalog = z.infer<typeof catalogSchema>;
 export const followUpStatuses: Record<FollowUp["status"], string> = {
   open: "Programat",
   waiting: "Așteptăm clientul",
@@ -99,12 +179,11 @@ export function nextOpportunityAction(o: Opportunity, followUps: FollowUp[]) {
     .sort((a, b) => a.due.localeCompare(b.due))[0];
 }
 export function staleOpportunity(o: Opportunity, now = Date.now()) {
-  const at =
-    o.updatedAt && o.updatedAt !== "0001-01-01T00:00:00Z"
-      ? o.updatedAt
-      : o.createdAt;
+  const at = o.stageChangedAt ?? o.createdAt;
   return activeOpportunity(o) && now - Date.parse(at) >= 7 * 86400000;
 }
+export const lastInteraction = (c: Customer) =>
+  c.lastInteractionAt ?? c.createdAt;
 export function dateOffset(days: number, base = today()) {
   const d = new Date(base + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + days);

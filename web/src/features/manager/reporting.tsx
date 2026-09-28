@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api";
-import { dateOffset, today, reportSchema } from "../../domain";
+import { activitySchema, dateOffset, today, reportSchema } from "../../domain";
+
+const range = (start: string, end: string) =>
+  start ? "from=" + start + "&to=" + end : "";
+
 export function useStoreReport() {
   const [period, setPeriod] = useState("30");
   const [from, setFrom] = useState(dateOffset(-29));
@@ -17,11 +21,7 @@ export function useStoreReport() {
   const query = useQuery({
     queryKey: ["manager", start, end],
     queryFn: async () =>
-      reportSchema.parse(
-        await api(
-          "manager/dashboard" + (start ? "?from=" + start + "&to=" + end : ""),
-        ),
-      ),
+      reportSchema.parse(await api("manager/dashboard?" + range(start, end))),
     enabled: valid,
   });
   const controls = (
@@ -65,5 +65,24 @@ export function useStoreReport() {
       )}
     </div>
   );
-  return { query, controls, valid };
+  return { query, controls, valid, start, end };
+}
+
+// useEmployeeActivity pages through one colleague's visits in the selected period.
+export function useEmployeeActivity(
+  employeeId: string | undefined,
+  start: string,
+  end: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["manager", "activity", employeeId, start, end],
+    queryFn: async () =>
+      activitySchema.parse(
+        await api(
+          `manager/employees/${employeeId}/activity?limit=100&${range(start, end)}`,
+        ),
+      ),
+    enabled: enabled && !!employeeId,
+  });
 }

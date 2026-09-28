@@ -11,7 +11,6 @@ import { Empty, Avatar } from "../../components/ui";
 import {
   today,
   date,
-  steps,
   stages,
   activeOpportunity,
   nextOpportunityAction,
@@ -196,16 +195,10 @@ export default function Manager({
             <>
               <div className="stats-grid report-stats">
                 {[
-                  ["Vizite înregistrate", q.data.visits.length],
-                  ["Clienți noi", q.data.newCustomers.length],
-                  [
-                    "Treceri la ofertă",
-                    q.data.events.filter((e) => e.stage === "offer").length,
-                  ],
-                  [
-                    "Oportunități câștigate",
-                    q.data.events.filter((e) => e.stage === "won").length,
-                  ],
+                  ["Vizite înregistrate", q.data.summary.visits],
+                  ["Clienți noi", q.data.summary.newCustomers],
+                  ["Treceri la ofertă", q.data.summary.offers],
+                  ["Contracte câștigate", q.data.summary.contracts],
                 ].map(([label, count]) => (
                   <div className="stat-card" key={label}>
                     <div>{label}</div>
@@ -215,10 +208,83 @@ export default function Manager({
                 ))}
               </div>
               <p className="report-note">
-                Ofertele și câștigurile sunt numărate din schimbările de etapă
+                Ofertele și contractele sunt numărate din schimbările de etapă
                 înregistrate. O oportunitate poate ajunge la ofertă de mai multe
-                ori. Stările inițiale din demo nu sunt evenimente istorice.
+                ori.
               </p>
+              <section className="card funnel">
+                <div className="section-heading">
+                  <div>
+                    <h2>Cât de departe ajung conversațiile</h2>
+                    <p>
+                      Vizite după cel mai avansat pas atins. Procentul arată
+                      trecerea față de nivelul anterior.
+                    </p>
+                  </div>
+                </div>
+                {q.data.funnel.map((level, i) => (
+                  <div className="funnel-line" key={level.step}>
+                    <span>{level.label}</span>
+                    <div>
+                      <i
+                        style={{
+                          width: `${q.data.summary.visits ? (level.count / q.data.summary.visits) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <strong>{level.count}</strong>
+                    <small>
+                      {i === 0
+                        ? "toate vizitele"
+                        : `${Math.round(level.rate * 100)}% din pasul anterior`}
+                    </small>
+                  </div>
+                ))}
+              </section>
+              <section className="card">
+                <div className="section-heading">
+                  <div>
+                    <h2>Echipa în interval</h2>
+                    <p>Selectează un coleg pentru portofoliu și activitate.</p>
+                  </div>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Coleg</th>
+                        <th>Clienți serviți</th>
+                        <th>Clienți noi</th>
+                        <th>Oportunități noi</th>
+                        <th>Oferte</th>
+                        <th>Contracte</th>
+                        <th>Restanțe acum</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {q.data.employees.map((e) => (
+                        <tr key={e.employeeId}>
+                          <td>
+                            <Link
+                              className="employee-link"
+                              to={"/team?employee=" + e.employeeId}
+                            >
+                              <Avatar name={e.name} small />
+                              {e.name}
+                            </Link>
+                          </td>
+                          <td>{e.customersHandled}</td>
+                          <td>{e.newCustomers}</td>
+                          <td>{e.opportunitiesCreated}</td>
+                          <td>{e.offers}</td>
+                          <td>{e.contracts}</td>
+                          <td>{e.overdueFollowUps}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
               <section className="card step-incidence">
                 <div className="section-heading">
                   <div>
@@ -229,28 +295,23 @@ export default function Manager({
                     </p>
                   </div>
                 </div>
-                {steps.map((step, i) => {
-                  const n = q.data.visits.filter((v) =>
-                    v.steps.includes(i),
-                  ).length;
+                {q.data.stepIncidence.map((step) => {
+                  const total = q.data.summary.visits;
                   return (
-                    <div className="incidence-row" key={step}>
-                      <span>{step}</span>
+                    <div className="incidence-row" key={step.step}>
+                      <span>{step.label}</span>
                       <div className="incidence-track">
                         <i
                           style={{
-                            width: `${q.data.visits.length ? (n / q.data.visits.length) * 100 : 0}%`,
+                            width: `${total ? (step.count / total) * 100 : 0}%`,
                           }}
                         />
                       </div>
                       <strong>
-                        {n} / {q.data.visits.length}
+                        {step.count} / {total}
                       </strong>
                       <small>
-                        {q.data.visits.length
-                          ? Math.round((n / q.data.visits.length) * 100)
-                          : 0}
-                        %
+                        {total ? Math.round((step.count / total) * 100) : 0}%
                       </small>
                     </div>
                   );

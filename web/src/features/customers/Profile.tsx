@@ -90,6 +90,11 @@ export default function Profile({
           <div>
             <span className="eyebrow">RELAȚIA CU CLIENTUL</span>
             <h1>{customer.name}</h1>
+            {customer.status !== "active" && (
+              <span className="tag">
+                {customer.status === "archived" ? "Arhivat" : "Anonimizat"}
+              </span>
+            )}
             <a href={"tel:" + customer.phone}>
               <Phone size={16} />
               {customer.phone}
@@ -295,6 +300,23 @@ export default function Profile({
               user={user}
               users={data.users}
             />
+            {q.data.ownershipHistory.length > 0 && (
+              <ol
+                className="ownership-history"
+                aria-label="Istoric responsabil"
+              >
+                {q.data.ownershipHistory.map((h) => (
+                  <li key={h.id}>
+                    <time>{date(h.at)}</time>
+                    <span>
+                      {h.data?.toOwnerId
+                        ? "Alocat lui " + ownerName(String(h.data.toOwnerId))
+                        : h.detail}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
           </section>
           <section className="card next-steps-card">
             <div className="section-heading">

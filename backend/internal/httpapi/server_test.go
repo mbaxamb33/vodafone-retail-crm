@@ -218,7 +218,7 @@ func TestManagerWorkflow(t *testing.T) {
 		t.Fatalf("report: %+v", rep)
 	}
 	var act crm.EmployeeActivity
-	if code, _ := mgr.do("GET", "manager/employees/"+st.Ioana.ID+"/activity", nil, &act); code != 200 || act.Total != 1 || act.Summary.OpportunitiesCreated != 1 {
+	if code, _ := mgr.do("GET", "manager/employees/"+st.Ioana.ID+"/activity", nil, &act); code != 200 || act.Total != 1 || act.Summary.OpportunitiesCreated != 1 || len(act.Customers) != 1 {
 		t.Fatalf("activity: %+v", act)
 	}
 	var opps crm.Page[crm.Opportunity]

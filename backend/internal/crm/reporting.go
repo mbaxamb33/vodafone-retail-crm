@@ -314,6 +314,8 @@ func (s *Service) ManagerDashboard(ctx context.Context, actor User, from, to str
 type EmployeeActivity struct {
 	Page[Visit]
 	Summary EmployeeReport `json:"summary"`
+	// Customers referenced by the listed visits.
+	Customers []Customer `json:"customers"`
 }
 
 // EmployeeActivity lists an employee's visits in a date range, newest first. Managers may view
@@ -345,7 +347,20 @@ func (s *Service) EmployeeActivity(ctx context.Context, actor User, employeeID, 
 	if err != nil {
 		return EmployeeActivity{}, err
 	}
-	out := EmployeeActivity{Page: Page[Visit]{Items: items, Total: total, Offset: offset, Limit: limit}}
+	out := EmployeeActivity{Page: Page[Visit]{Items: items, Total: total, Offset: offset, Limit: limit}, Customers: []Customer{}}
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, v := range items {
+		if !seen[v.CustomerID] {
+			seen[v.CustomerID] = true
+			ids = append(ids, v.CustomerID)
+		}
+	}
+	if len(ids) > 0 {
+		if out.Customers, err = s.store.CustomersByID(ctx, actor.StoreID, ids); err != nil {
+			return out, err
+		}
+	}
 	counts, err := s.store.EmployeeCounts(ctx, actor.StoreID, r, today)
 	if err != nil {
 		return out, err

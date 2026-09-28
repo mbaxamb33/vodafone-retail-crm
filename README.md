@@ -1,86 +1,118 @@
 # Vodafone Retail — customer relationships
 
-A runnable first implementation of the Romanian retail CRM: React + TypeScript frontend and Go HTTP API. This is a local demonstration with fictional data, not a production deployment.
+Internal CRM for a Vodafone retail store: who the customer is, what happened on earlier visits, where the commercial conversation stands, and who follows up. React + TypeScript frontend, Go HTTP API, PostgreSQL.
 
-## Run
+It is the store's relationship and sales-workflow layer, not a replacement for billing, contract or provisioning systems.
 
-Requires Node 22.12+ (Node 24 recommended), npm, and Go 1.24+.
+## Run locally
+
+Requires Node 22.12+ (Node 24 recommended), Go 1.24+, and Docker (for PostgreSQL).
 
 ```sh
 npm install
-make dev
+make seed      # starts PostgreSQL on 127.0.0.1:5434, applies migrations, creates the demo store
+make dev       # database + API on 127.0.0.1:8080 + frontend on 127.0.0.1:5173
 ```
 
-Open **http://127.0.0.1:5173**. Choose the employee or manager demonstration account. The API listens on `127.0.0.1:8080`. Use the exact frontend origin above; mutations enforce the configured origin.
+Open **http://127.0.0.1:5173**. `make seed` prints the demo accounts and a generated password; set `DEMO_PASSWORD` before seeding to choose it. Demo accounts (all fictional data):
 
-Alternatively, start each service separately:
+| Email                         | Role     |
+| ----------------------------- | -------- |
+| `ioana.marinescu@demo.local`  | employee |
+| `andrei.popescu@demo.local`   | employee |
+| `elena.dumitrescu@demo.local` | manager  |
+
+The demo history (about two months of visits, stage changes, reassignments) is produced through the real services with a simulated clock, so reports and audit behave as in real use. `make db-reset` deletes all local data and reseeds.
+
+To run the pieces separately: `make db-up`, then `cd backend && DATABASE_URL=… go run ./cmd/server`, and `npm run dev`. If the API runs elsewhere, start Vite with `API_URL=http://host:port npm run dev`.
+
+## Accounts and stores
+
+Accounts are managed with the `crmctl` CLI. Passwords are read from `CRM_PASSWORD` or standard input, never from flags.
 
 ```sh
 cd backend
-DEMO_MODE=true go run ./cmd/server
+export DATABASE_URL=postgres://crm:crm@127.0.0.1:5434/crm?sslmode=disable
+go run ./cmd/crmctl create-store -name "Magazin Iași"             # prints the store ID
+go run ./cmd/crmctl create-user -store <id> -email ana@example.com -name "Ana Pop" -role employee
+go run ./cmd/crmctl reset-password -email ana@example.com          # revokes the user's sessions
+go run ./cmd/crmctl deactivate-user -email ana@example.com
+go run ./cmd/crmctl list-stores
 ```
 
-```sh
-npm run dev
-```
-
-## Implemented slice
-
-- Romanian responsive interface with daily action queue, global phone/name search, customer directory and portfolio.
-- Customer creation, normalized Romanian phone numbers, stable random IDs, shared phone numbers permitted.
-- Customer history with paginated visits, author attribution, explicit journey-step selection, notes, ownership, optional opportunity and follow-up in one atomic operation.
-- Follow-up completion, opportunity board and stage updates, final won/lost states protected against reopening.
-- Distinct manager overview (attention queues, current pipeline, dated activity reports) and team workspace (employee workload, portfolio, opportunities, follow-ups, and visit activity).
-- Shareable customer profile routes with last-conversation context, all store-visible customer opportunities and follow-ups, standalone ownership changes, and quick visits from search.
-- Follow-up scheduling, rescheduling, waiting/unreachable outcomes and completion timestamps. Explicit opportunity links power missing-next-action and seven-day stale-stage indicators.
-- Manager date ranges use Europe/Bucharest boundaries. Offer/win counts come from recorded stage events; visit-step incidence is clearly separated from conversion metrics.
-- Server-side store isolation and authorization; employees cannot take another employee's customer or mutate another employee's follow-ups/opportunities.
-- Cookie sessions, origin checks, login throttling, payload limits, request IDs, health endpoints and graceful shutdown.
-- Durable JSON repository with atomic file replacement, restrictive file permissions, and an application-facing repository interface.
-
-## Architecture
-
-`web/src/features/` contains customer, follow-up, opportunity and manager screens. `components/ui.tsx` contains shared primitives. `domain.ts` holds runtime API schemas, types and domain formatting. `api.ts` handles cookies, errors and expired sessions. TanStack Query owns server state; local component state owns filters and drafts. Customer creation uses React Hook Form and Zod.
-
-`backend/internal/crm` owns domain types, validation, permissions, atomic business operations and the repository boundary. `backend/cmd/server` owns HTTP, sessions, origin protection, response encoding and runtime configuration. The JSON adapter is for a single local server process; it is not a database selection for the production system. Do not run multiple servers against the same file.
+Signed-in users can change their own password with `POST /api/v1/auth/password`.
 
 ## Configuration
 
-| Variable      | Default                 | Purpose                                                                                       |
-| ------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
-| `DEMO_MODE`   | disabled                | Must be `true` for the local demonstration; production authentication is not yet implemented. |
-| `LISTEN_ADDR` | `127.0.0.1:8080`        | Go listen address.                                                                            |
-| `APP_ORIGIN`  | `http://127.0.0.1:5173` | Exact allowed mutation origin. HTTPS enables Secure session cookies.                          |
-| `DATA_PATH`   | `data/store.json`       | Repository path relative to backend working directory.                                        |
+| Variable       | Default                 | Purpose                                                                           |
+| -------------- | ----------------------- | --------------------------------------------------------------------------------- |
+| `DATABASE_URL` | required                | PostgreSQL connection URL.                                                        |
+| `APP_ENV`      | `development`           | `production` requires an `https://` `APP_ORIGIN`.                                 |
+| `LISTEN_ADDR`  | `127.0.0.1:8080`        | API listen address.                                                               |
+| `APP_ORIGIN`   | `http://127.0.0.1:5173` | Exact origin allowed to send mutations. HTTPS enables Secure cookies.             |
+| `AUTO_MIGRATE` | `true`                  | Apply pending migrations at startup (guarded by an advisory lock).                |
+| `SESSION_TTL`  | `8h`                    | Session lifetime.                                                                 |
+| `LOG_LEVEL`    | `info`                  | `debug`, `info`, `warn` or `error`.                                               |
+| `FEATURES`     | empty                   | Comma-separated feature flags, returned to the frontend by `GET /api/v1/auth/me`. |
 
-Demo profiles are seeded only when the file does not exist. Changes survive server restarts; sessions are in memory and require login after restart. Keep this demo local and use fictional data only.
+Secrets belong in the environment, never in the repository. The credentials in `docker-compose.yml` are for the disposable local container only.
+
+## Architecture
+
+```
+backend/
+  cmd/server        HTTP server: configuration, wiring, graceful shutdown
+  cmd/crmctl        administration CLI: migrations, stores, accounts, demo seed
+  internal/crm      domain: entities, validation, role permissions, services, events
+  internal/auth     password hashing (bcrypt), sessions, login throttling
+  internal/postgres PostgreSQL store, embedded migrations, test helpers (pgtest)
+  internal/httpapi  routes, middleware (request IDs, logging, origin check, auth), JSON errors
+  internal/apperr   classified errors with codes and field messages
+  internal/config   environment configuration
+  internal/demo     fictional demo data
+web/src
+  features/         customers, follow-ups, opportunities, manager, notifications
+  components/ui.tsx shared primitives
+  domain.ts         runtime API schemas (Zod), types, formatting
+  api.ts, hooks.ts  API client and shared queries
+```
+
+- **Layers.** Handlers decode and respond; `crm.Service` validates, authorizes and runs business operations; the `crm.Store` interface is the persistence boundary, implemented by `internal/postgres`.
+- **Consistency.** Operations touching several records (a visit with ownership change, opportunities and a follow-up) run in one transaction. Rows being changed are locked with `SELECT … FOR UPDATE`, so concurrent edits serialize and several API instances can share the database.
+- **Authorization.** Every rule is enforced on the server. Roles map to permissions in `internal/crm/authz.go`; adding a role means adding a row there. All reads and writes are scoped to the signed-in user's store.
+- **History.** Visits, opportunity stage events and audit events are append-only. Edited visit notes keep their previous text in `visit_note_revisions`. Reports are computed from recorded events, never from counters.
+- **Events.** Each business action is emitted as an audit event inside its transaction; in-app notifications (customer assigned or returned, follow-up assigned, opportunity changed by a colleague) are derived there. This is the hook for future integrations.
+- **Configurable lists.** Visit reasons, next actions and product categories live in `catalog_items` (global defaults, optionally overridden per store).
+- **Privacy.** Logs record request ID, route, status, duration, user and store — never bodies, query strings or customer data. Managers can anonymize a customer (`POST /customers/{id}/anonymize`), which clears identifying data and free-text notes while keeping counts. Employees see store-level context but not the audit log.
 
 ## Verify
 
 ```sh
-make test       # Go race tests, frontend domain and interaction tests
+make db-up      # the Go tests use real PostgreSQL in throwaway schemas
+make test       # Go tests with the race detector, frontend tests
 make lint       # ESLint, go vet, gofmt check
-make build      # strict TypeScript build, Vite bundle, Go binary
-npm run format # format frontend, documentation and config
+make build      # strict TypeScript build, Vite bundle, backend/bin/{server,crmctl}
+npm run format  # format frontend, documentation and config
 ```
 
-CI builds and checks both applications. Business tests exercise transaction rollback, nonsequential journey history, ownership, store boundaries, follow-up permissions, opportunity finality, file persistence, session protection and manager authorization.
+Database tests are skipped when `TEST_DATABASE_URL` is unset locally; CI sets `REQUIRE_DATABASE_TESTS=true` so they cannot be skipped there. CI runs PostgreSQL as a service and fails on formatting, lint, type, test or build errors.
 
-## Next implementation milestones
+The Go tests cover transaction rollback, historical visit steps, ownership rules, store isolation, follow-up and opportunity lifecycles, report date boundaries and funnel counts, search and paging, note revisions, anonymization, login throttling and session revocation, plus HTTP-level employee and manager workflows.
 
-- Production identity provider, managed session persistence, deployment/TLS configuration and operational monitoring.
-- Server-side search, pagination and sorting for all lists. The current `/workspace` bootstrap returns the store's customer directory and the authorized work queue, suited to this small local demo; only visit history is paginated.
-- Configurable reason/action catalogs, customer editing and retention/anonymization workflows.
-- Historical conversion cohorts and longer-term reporting. Current reports show dated operational events and observed visit-step incidence; seeded opportunity states are not invented historical events.
-- Persistent internal notifications, field-level backend validation errors, centralized translation catalogs and automated browser E2E coverage. Component interaction tests cover the manager split, rejected ownership changes, colleague visits, search prefill and follow-up outcomes.
-- Production persistence decision, migration strategy and concurrency control for multiple service instances.
+## Deliberate limits and next steps
 
-The demo login deliberately lets the local reviewer choose a role. It must be replaced before any real customer data or external deployment. The server refuses to start without explicit demo mode.
+- **Identity.** Email and password with server-side sessions. A company identity provider (OIDC/SSO) can replace `internal/auth` without touching the domain. There is no self-service password reset; administrators use `crmctl`.
+- **Browser end-to-end tests.** The critical workflows are tested at API level; Playwright tests against a seeded database are the next step.
+- **Metrics.** Structured logs carry latency and status per route; a metrics endpoint (e.g. Prometheus) is not yet exposed.
+- **Retention.** Anonymization exists; an automatic retention schedule needs a policy decision first.
+- **Anonymization and open tasks.** Anonymizing does not close the customer's open follow-ups.
+- **Workspace size.** `/workspace` returns the user's own work (store-wide for managers) plus the customers it references. The store directory, search and portfolios use the paginated `/customers` endpoint.
+- **Translations.** Interface text is Romanian and sits in the components; the server returns Romanian error messages alongside stable error codes.
 
-## Workflow details
+## Workflow rules
 
-Ownership changes are audited independently and do not create a visit, change the last interaction date, or silently transfer existing tasks. Employees may claim pool customers and release their own; managers may assign another member of the same store. Visits default to preserving ownership.
+Ownership changes are audited on their own and never create a visit, change the last interaction or move existing tasks. Employees may claim pool customers and release their own; managers may assign any member of their store. Visits keep the current owner unless the form says otherwise.
 
-Follow-ups remain actionable when waiting for the customer or when a call was unanswered; both require a next check-in date. Completing a follow-up preserves its due date and records completion time. An opportunity next step is an explicitly linked follow-up, not an unrelated task on the same customer. Existing unlinked demo tasks remain unlinked.
+A visit stores exactly the journey steps selected; earlier steps are never inferred. Its furthest step feeds the conversation funnel. Opportunities created in a visit start at `identified`, independent of the visit's steps. A next action is linked to the visit's opportunity only when exactly one was created.
 
-Customer profiles at `/customers/{id}` show store-level relationship context to store employees, while personal workspace lists and mutation permissions remain scoped to the responsible employee or manager. Manager audit history remains manager-only.
+Waiting and unreachable follow-ups need a next check-in date. Completion keeps the due date, records the completion time and is final. Won and lost opportunities are final; repeating the current stage records nothing.

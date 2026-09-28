@@ -7,6 +7,7 @@ import Profile from "./features/customers/Profile";
 import Pipeline from "./features/opportunities/Pipeline";
 import FollowUps from "./features/followups/FollowUps";
 import CustomerList from "./features/customers/CustomerList";
+import Notifications from "./features/notifications/Notifications";
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,16 +35,17 @@ import {
   Sun,
 } from "lucide-react";
 import { api } from "./api";
+import { useCustomers, useDebounced } from "./hooks";
 import {
-  userSchema,
+  meSchema,
   workspaceSchema,
   stages,
-  matches,
   date,
   today,
-  type User,
+  lastInteraction,
   type Customer,
 } from "./domain";
+import type { z } from "zod";
 
 const nav = [
   ["/", "Astăzi", Home],
@@ -54,10 +56,13 @@ const nav = [
 ] as const;
 export default function App() {
   const qc = useQueryClient();
-  const [user, setUser] = useState<User | null>(null);
+  const [me, setMe] = useState<z.infer<typeof meSchema> | null>(null);
+  const user = me?.user ?? null;
   const [boot, setBoot] = useState(true);
-  const [loginRole, setLoginRole] = useState("employee");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounced(search.trim());
   const [initialPhone, setInitialPhone] = useState("");
   const [visit, setVisit] = useState<Customer | null>(null);
   const [create, setCreate] = useState(false);
@@ -71,11 +76,11 @@ export default function App() {
     navigate(id ? `/customers/${id}` : "/customers");
   useEffect(() => {
     api("auth/me")
-      .then((v) => setUser(userSchema.parse(v)))
+      .then((v) => setMe(meSchema.parse(v)))
       .catch(() => {})
       .finally(() => setBoot(false));
     const expired = () => {
-      setUser(null);
+      setMe(null);
       qc.clear();
     };
     window.addEventListener("session-expired", expired);
@@ -88,10 +93,11 @@ export default function App() {
     }
   }, [toast]);
   const login = useMutation({
-    mutationFn: () => api("auth/login", { role: loginRole }),
+    mutationFn: () => api("auth/login", { email, password }),
     onSuccess: (v) => {
-      setUser(userSchema.parse(v));
       qc.clear();
+      setPassword("");
+      setMe(meSchema.parse(v));
     },
   });
   const ws = useQuery({
@@ -99,6 +105,11 @@ export default function App() {
     queryFn: async () => workspaceSchema.parse(await api("workspace")),
     enabled: !!user,
   });
+  const searchResults = useCustomers(
+    { q: debouncedSearch, limit: 6 },
+    !!user && debouncedSearch.length >= 2,
+  );
+  const recent = useCustomers({ sort: "recent", limit: 3 }, !!user);
   const refresh = (message: string) => {
     void qc.invalidateQueries();
     setToast(message);
@@ -144,29 +155,48 @@ export default function App() {
             <span className="eyebrow">BUN VENIT ÎN ECHIPĂ</span>
             <h2>O zi bună începe aici.</h2>
             <p>Intră în spațiul tău de lucru.</p>
-            <label htmlFor="role">Spațiu demonstrativ</label>
-            <select
-              id="role"
-              value={loginRole}
-              onChange={(e) => setLoginRole(e.target.value)}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                login.mutate();
+              }}
             >
-              <option value="employee">Ioana Marinescu · Consultant</option>
-              <option value="manager">Elena Dumitrescu · Manager</option>
-            </select>
-            <button
-              className="button primary full"
-              disabled={login.isPending}
-              onClick={() => login.mutate()}
-            >
-              {login.isPending ? "Se conectează…" : "Intră în aplicație"}
-              <ArrowRight size={18} />
-            </button>
-            {login.error && <p className="error">{login.error.message}</p>}
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="username"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <label htmlFor="password">Parolă</label>
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                className="button primary full"
+                disabled={login.isPending}
+              >
+                {login.isPending ? "Se conectează…" : "Intră în aplicație"}
+                <ArrowRight size={18} />
+              </button>
+            </form>
+            {login.error && (
+              <p className="error" role="alert">
+                {login.error.message}
+              </p>
+            )}
             <div className="demo-note">
               <ShieldCheck size={18} />
               <span>
-                Demo local cu date fictive. Autentificarea de producție urmează
-                să fie integrată.
+                Datele clienților sunt confidențiale. Nu îți împărtăși contul și
+                deconectează-te când pleci de la calculator.
               </span>
             </div>
           </div>
@@ -202,7 +232,8 @@ export default function App() {
         <div className="store-label">
           <Store size={17} />
           <div>
-            Magazin București<small>Spațiu demonstrativ</small>
+            {me?.store.name}
+            <small>Magazinul tău</small>
           </div>
           <span className="live-dot" />
         </div>
@@ -257,8 +288,8 @@ export default function App() {
               className="icon-button"
               aria-label="Deconectare"
               onClick={async () => {
-                await api("auth/logout", {});
-                setUser(null);
+                await api("auth/logout", {}).catch(() => {});
+                setMe(null);
                 qc.clear();
               }}
             >
@@ -287,34 +318,42 @@ export default function App() {
             <span className="search-hint">CĂUTARE RAPIDĂ</span>
             {search && (
               <div className="search-results">
-                {customers
-                  .filter((c) => matches(c, search))
-                  .slice(0, 6)
-                  .map((c) => (
-                    <div className="search-result-row" key={c.id}>
-                      <button onClick={() => showCustomer(c.id)}>
-                        <Avatar name={c.name} small />
-                        <div>
-                          <strong>{c.name}</strong>
-                          <small>{c.phone}</small>
-                        </div>
-                        <ChevronRight size={17} />
-                      </button>
-                      <button
-                        className="quick-visit-result"
-                        aria-label={"Înregistrează vizita pentru " + c.name}
-                        onClick={() => {
-                          showCustomer(c.id);
-                          setVisit(c);
-                        }}
-                      >
-                        <Plus size={16} />
-                        Vizită
-                      </button>
-                    </div>
-                  ))}
-                {!customers.some((c) => matches(c, search)) && (
-                  <p>Nu am găsit acest client.</p>
+                {search.trim().length < 2 ? (
+                  <p>Continuă să scrii numele sau numărul.</p>
+                ) : searchResults.isPending ||
+                  debouncedSearch !== search.trim() ? (
+                  <p>Se caută…</p>
+                ) : searchResults.isError ? (
+                  <p role="alert">{searchResults.error.message}</p>
+                ) : (
+                  <>
+                    {searchResults.data.items.map((c) => (
+                      <div className="search-result-row" key={c.id}>
+                        <button onClick={() => showCustomer(c.id)}>
+                          <Avatar name={c.name} small />
+                          <div>
+                            <strong>{c.name}</strong>
+                            <small>{c.phone}</small>
+                          </div>
+                          <ChevronRight size={17} />
+                        </button>
+                        <button
+                          className="quick-visit-result"
+                          aria-label={"Înregistrează vizita pentru " + c.name}
+                          onClick={() => {
+                            showCustomer(c.id);
+                            setVisit(c);
+                          }}
+                        >
+                          <Plus size={16} />
+                          Vizită
+                        </button>
+                      </div>
+                    ))}
+                    {!searchResults.data.items.length && (
+                      <p>Nu am găsit acest client.</p>
+                    )}
+                  </>
                 )}
                 <button
                   onClick={() => {
@@ -330,10 +369,7 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <span className="store-open">
-              <span className="live-dot" />
-              Echipa ta, conectată
-            </span>
+            <Notifications onOpen={showCustomer} />
             <Avatar name={user.name} small />
           </div>
         </header>
@@ -516,32 +552,27 @@ export default function App() {
                             </NavLink>
                           </div>
                           <div className="recent-grid">
-                            {[...customers]
-                              .sort((a, b) =>
-                                b.updatedAt.localeCompare(a.updatedAt),
-                              )
-                              .slice(0, 3)
-                              .map((c) => (
-                                <button
-                                  className="recent-card"
-                                  key={c.id}
-                                  onClick={() => showCustomer(c.id)}
-                                >
-                                  <div>
-                                    <Avatar name={c.name} />
-                                    <ArrowUpRight size={17} />
-                                  </div>
-                                  <h3>{c.name}</h3>
-                                  <p>{c.phone}</p>
-                                  <span className="tag">
-                                    {c.tags[0] ?? "Client nou"}
-                                  </span>
-                                  <footer>
-                                    Ultima interacțiune
-                                    <span>{date(c.updatedAt)}</span>
-                                  </footer>
-                                </button>
-                              ))}
+                            {(recent.data?.items ?? []).map((c) => (
+                              <button
+                                className="recent-card"
+                                key={c.id}
+                                onClick={() => showCustomer(c.id)}
+                              >
+                                <div>
+                                  <Avatar name={c.name} />
+                                  <ArrowUpRight size={17} />
+                                </div>
+                                <h3>{c.name}</h3>
+                                <p>{c.phone}</p>
+                                <span className="tag">
+                                  {c.tags[0] ?? "Client nou"}
+                                </span>
+                                <footer>
+                                  Ultima interacțiune
+                                  <span>{date(lastInteraction(c))}</span>
+                                </footer>
+                              </button>
+                            ))}
                           </div>
                         </section>
                       </div>
@@ -685,7 +716,7 @@ export default function App() {
             vodafone <b>retail</b>
           </span>
           <span>Relații care contează. În fiecare zi.</span>
-          <span>Demo · Date fictive</span>
+          <span>Uz intern · Date confidențiale</span>
         </footer>
       </div>
       {visit && (

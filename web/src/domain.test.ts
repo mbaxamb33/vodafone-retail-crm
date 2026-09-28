@@ -74,12 +74,9 @@ describe("opportunity next actions", () => {
     };
     expect(staleOpportunity(o, now)).toBe(true);
     expect(
-      staleOpportunity({ ...o, updatedAt: "2026-09-28T00:00:00Z" }, now),
+      staleOpportunity({ ...o, stageChangedAt: "2026-09-28T00:00:00Z" }, now),
     ).toBe(false);
     expect(staleOpportunity({ ...o, stage: "won" }, now)).toBe(false);
-    expect(
-      staleOpportunity({ ...o, updatedAt: "0001-01-01T00:00:00Z" }, now),
-    ).toBe(true);
   });
   it("calculates calendar date ranges across month and year boundaries", () => {
     expect(dateOffset(-6, "2026-10-02")).toBe("2026-09-26");
