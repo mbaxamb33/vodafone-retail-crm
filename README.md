@@ -1,6 +1,6 @@
-# Vodafone Retail — customer relationships
+# Bright Signa — customer relationships
 
-Internal CRM for a Vodafone retail store: who the customer is, what happened on earlier visits, where the commercial conversation stands, and who follows up. React + TypeScript frontend, Go HTTP API, PostgreSQL.
+Internal CRM for Bright Signa, a Vodafone franchise: who the customer is, what happened on earlier visits, where the commercial conversation stands, and who follows up. React + TypeScript frontend, Go HTTP API, PostgreSQL.
 
 It is the store's relationship and sales-workflow layer, not a replacement for billing, contract or provisioning systems.
 

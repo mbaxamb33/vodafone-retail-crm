@@ -1,3 +1,4 @@
+import Brand, { BrandMark } from "./components/Brand";
 import { Avatar, Empty } from "./components/ui";
 import Manager from "./features/manager/Manager";
 import Team from "./features/manager/Team";
@@ -123,7 +124,7 @@ export default function App() {
   if (boot)
     return (
       <div className="boot">
-        <span className="brand-mark" />
+        <BrandMark />
         <p>Se pregătește spațiul tău de lucru…</p>
       </div>
     );
@@ -131,10 +132,7 @@ export default function App() {
     return (
       <div className="login">
         <section className="login-story">
-          <div className="brand">
-            <span className="brand-mark" />
-            vodafone <span>retail</span>
-          </div>
+          <Brand />
           <div>
             <span className="eyebrow">FIECARE CONVERSAȚIE CONTEAZĂ</span>
             <h1>
@@ -225,9 +223,8 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className={"sidebar " + (mobile ? "open" : "")}>
-        <NavLink to="/" className="brand">
-          <span className="brand-mark" />
-          vodafone<span>retail</span>
+        <NavLink to="/" aria-label="Bright Signa — Acasă">
+          <Brand />
         </NavLink>
         <div className="store-label">
           <Store size={17} />
@@ -712,9 +709,7 @@ export default function App() {
           )}
         </main>
         <footer className="app-footer">
-          <span>
-            vodafone <b>retail</b>
-          </span>
+          <Brand compact />
           <span>Relații care contează. În fiecare zi.</span>
           <span>Uz intern · Date confidențiale</span>
         </footer>

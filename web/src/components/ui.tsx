@@ -46,7 +46,7 @@ export function Modal({
     >
       <div className="modal-head">
         <div>
-          <span className="eyebrow">VODAFONE · RELAȚII CU CLIENȚII</span>
+          <span className="eyebrow">BRIGHT SIGNA · RELAȚII CU CLIENȚII</span>
           <h2 id={titleId}>{title}</h2>
         </div>
         <button className="icon-button" aria-label="Închide" onClick={onClose}>

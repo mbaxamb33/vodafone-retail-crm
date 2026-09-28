@@ -125,45 +125,6 @@ svg {
   flex-direction: column;
   z-index: 30;
 }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 24px;
-  letter-spacing: -1.2px;
-  font-weight: 700;
-  color: var(--red);
-  white-space: nowrap;
-}
-.brand > span:last-child:not(.brand-mark) {
-  font-size: 13px;
-  color: #929298;
-  letter-spacing: 0.2px;
-  font-weight: 400;
-  border-left: 1px solid #ddd;
-  padding-left: 9px;
-  margin-left: 2px;
-}
-.brand-mark {
-  display: inline-block;
-  position: relative;
-  width: 33px;
-  height: 33px;
-  border-radius: 50%;
-  background: var(--red);
-  flex-shrink: 0;
-}
-.brand-mark:after {
-  content: "";
-  position: absolute;
-  background: white;
-  width: 15px;
-  height: 19px;
-  left: 9px;
-  top: 7px;
-  border-radius: 70% 0 65% 65%;
-  transform: rotate(-24deg);
-}
 .store-label {
   display: flex;
   align-items: center;
@@ -1466,19 +1427,6 @@ td:first-child {
   right: -300px;
   bottom: -70px;
 }
-.login-story .brand {
-  color: white;
-}
-.login-story .brand-mark {
-  background: white;
-}
-.login-story .brand-mark:after {
-  background: #e60000;
-}
-.login-story .brand > span:last-child {
-  color: #ffd3d3;
-  border-color: #ffffff55;
-}
 .login-story .eyebrow {
   color: #ffbebe;
   font-size: 10px;
@@ -1609,13 +1557,6 @@ td:first-child {
     padding-left: 15px;
     padding-right: 15px;
   }
-  .brand {
-    font-size: 21px;
-    gap: 6px;
-  }
-  .brand > span:last-child:not(.brand-mark) {
-    font-size: 11px;
-  }
   .main-shell {
     margin-left: 215px;
   }
@@ -1691,9 +1632,6 @@ td:first-child {
   }
   .main-shell {
     margin-left: 195px;
-  }
-  .brand > span:last-child:not(.brand-mark) {
-    display: none;
   }
   .sidebar nav a {
     font-size: 12px;
@@ -1799,9 +1737,6 @@ td:first-child {
   .search-results {
     left: -40px;
     right: -35px;
-  }
-  .sidebar.open .brand > span:last-child {
-    display: block;
   }
   main {
     padding: 25px 20px;
@@ -1917,9 +1852,6 @@ td:first-child {
   }
   .funnel-line > svg {
     display: none;
-  }
-  .login-story .brand > span:last-child {
-    display: block;
   }
 }
 @media (max-width: 480px) {
@@ -3201,4 +3133,95 @@ label {
 }
 .login-card form {
   display: grid;
+}
+
+/* Bright Signa: an original spark mark and franchise wordmark. */
+.bright-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+  color: #282832;
+  font-family: Manrope, sans-serif;
+  line-height: 1;
+}
+.brand-symbol {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  color: #e60000;
+  stroke: none;
+}
+.brand-wordmark {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.8px;
+}
+.brand-wordmark strong {
+  font-weight: 800;
+}
+.login-story .bright-brand {
+  color: #fff;
+  position: relative;
+  z-index: 1;
+}
+.login-story .brand-symbol {
+  color: #fff;
+  width: 42px;
+  height: 42px;
+}
+.login-story .brand-wordmark {
+  font-size: 28px;
+  letter-spacing: -1px;
+}
+.boot > .brand-symbol {
+  width: 52px;
+  height: 52px;
+}
+.app-footer > .bright-brand.compact {
+  font-weight: 400;
+  letter-spacing: normal;
+  color: #888892;
+}
+.bright-brand.compact .brand-symbol {
+  width: 22px;
+  height: 22px;
+  color: #93939c;
+}
+.bright-brand.compact .brand-wordmark {
+  font-size: 13px;
+  letter-spacing: -0.3px;
+}
+@media (max-width: 1200px) {
+  .sidebar .brand-wordmark {
+    font-size: 19px;
+  }
+  .sidebar .brand-symbol {
+    width: 31px;
+    height: 31px;
+  }
+  .sidebar .bright-brand {
+    gap: 7px;
+  }
+}
+@media (max-width: 1000px) {
+  .sidebar .brand-wordmark {
+    font-size: 18px;
+  }
+  .sidebar .brand-symbol {
+    width: 28px;
+    height: 28px;
+  }
+}
+@media (max-width: 760px) {
+  .sidebar .brand-wordmark {
+    font-size: 22px;
+  }
+  .sidebar .brand-symbol {
+    width: 36px;
+    height: 36px;
+  }
+  .sidebar .bright-brand {
+    gap: 9px;
+  }
 }
