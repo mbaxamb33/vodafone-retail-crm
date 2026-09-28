@@ -1,0 +1,6 @@
+node_modules/
+web/dist/
+backend/data/
+.env
+*.log
+*.tsbuildinfo

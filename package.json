@@ -1,0 +1,15 @@
+{
+  "name": "vodafone-relationships",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm --workspace web run dev",
+    "build": "npm --workspace web run build",
+    "test": "npm --workspace web run test",
+    "lint": "npm --workspace web run lint",
+    "format": "prettier --write \"web/src/**/*.{ts,tsx,css}\" \"*.{json,md}\" \"docs/*.md\" \"web/*.{json,ts,js,html}\"",
+    "format:check": "prettier --check \"web/src/**/*.{ts,tsx,css}\" \"*.{json,md}\" \"docs/*.md\" \"web/*.{json,ts,js,html}\""
+  }
+}
