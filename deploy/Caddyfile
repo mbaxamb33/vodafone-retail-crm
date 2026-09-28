@@ -1,10 +1,6 @@
-# Caddy obtains and renews HTTPS certificates for $DOMAIN and www.$DOMAIN automatically.
+# Caddy obtains and renews the HTTPS certificate for $DOMAIN automatically.
 {$DOMAIN} {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy app:8080
-}
-
-www.{$DOMAIN} {
-	redir https://{$DOMAIN}{uri} permanent
 }
