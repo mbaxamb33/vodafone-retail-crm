@@ -273,12 +273,16 @@ export default function Manager({
                               {e.name}
                             </Link>
                           </td>
-                          <td>{e.customersHandled}</td>
-                          <td>{e.newCustomers}</td>
-                          <td>{e.opportunitiesCreated}</td>
-                          <td>{e.offers}</td>
-                          <td>{e.contracts}</td>
-                          <td>{e.overdueFollowUps}</td>
+                          <td data-label="Clienți serviți">
+                            {e.customersHandled}
+                          </td>
+                          <td data-label="Clienți noi">{e.newCustomers}</td>
+                          <td data-label="Oportunități noi">
+                            {e.opportunitiesCreated}
+                          </td>
+                          <td data-label="Oferte">{e.offers}</td>
+                          <td data-label="Contracte">{e.contracts}</td>
+                          <td data-label="Restanțe">{e.overdueFollowUps}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -1,3 +1,4 @@
+import MobileNavigation from "./components/MobileNavigation";
 import Brand, { BrandMark } from "./components/Brand";
 import { Avatar, Empty } from "./components/ui";
 import Manager from "./features/manager/Manager";
@@ -9,7 +10,7 @@ import Pipeline from "./features/opportunities/Pipeline";
 import FollowUps from "./features/followups/FollowUps";
 import CustomerList from "./features/customers/CustomerList";
 import Notifications from "./features/notifications/Notifications";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -27,7 +28,6 @@ import {
   Plus,
   X,
   LogOut,
-  Menu,
   CheckCheck,
   Store,
   TrendingUp,
@@ -57,6 +57,7 @@ const nav = [
 ] as const;
 export default function App() {
   const qc = useQueryClient();
+  const searchRef = useRef<HTMLDivElement>(null);
   const [me, setMe] = useState<z.infer<typeof meSchema> | null>(null);
   const user = me?.user ?? null;
   const [boot, setBoot] = useState(true);
@@ -93,6 +94,23 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [toast]);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (!searchRef.current?.contains(event.target as Node)) setSearch("");
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSearch("");
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [location.pathname]);
   const login = useMutation({
     mutationFn: () => api("auth/login", { email, password }),
     onSuccess: (v) => {
@@ -222,7 +240,10 @@ export default function App() {
   };
   return (
     <div className="app-shell">
-      <aside className={"sidebar " + (mobile ? "open" : "")}>
+      <a className="skip-link" href="#main-content">
+        Sari la conținut
+      </a>
+      <aside className="sidebar">
         <NavLink to="/" aria-label="Bright Signa — Acasă">
           <Brand />
         </NavLink>
@@ -297,22 +318,37 @@ export default function App() {
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <button
-            className="icon-button mobile-menu"
-            aria-label="Meniu"
-            onClick={() => setMobile(!mobile)}
+          <NavLink
+            to="/"
+            className="mobile-header-brand"
+            aria-label="Bright Signa — Acasă"
           >
-            <Menu />
-          </button>
-          <div className="global-search">
+            <Brand />
+          </NavLink>
+          <div className="header-context">
+            <span>SPAȚIUL TĂU</span>
+            <strong>
+              {selected
+                ? "Relația cu clientul"
+                : page === "/manager"
+                  ? "Privire de ansamblu"
+                  : page === "/team"
+                    ? "Echipa mea"
+                    : (nav.find(([path]) => path === page)?.[1] ??
+                      "Bright Signa")}
+            </strong>
+          </div>
+          <div className="global-search" ref={searchRef}>
             <Search size={19} />
             <input
               aria-label="Caută un client"
-              placeholder="Caută un client după nume sau telefon"
+              placeholder="Caută un nume sau un telefon…"
+              inputMode="search"
+              autoComplete="off"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <span className="search-hint">CĂUTARE RAPIDĂ</span>
+            <span className="search-hint">Caută & conectează</span>
             {search && (
               <div className="search-results">
                 {search.trim().length < 2 ? (
@@ -370,7 +406,7 @@ export default function App() {
             <Avatar name={user.name} small />
           </div>
         </header>
-        <main>
+        <main id="main-content" tabIndex={-1}>
           {ws.isPending ? (
             <div className="skeleton">
               <div />
@@ -389,7 +425,7 @@ export default function App() {
               <>
                 {page === "/" && (
                   <>
-                    <div className="page-heading">
+                    <div className="page-heading dashboard-hero">
                       <div>
                         <div className="eyebrow date-line">
                           <Sun size={15} />
@@ -417,8 +453,13 @@ export default function App() {
                         <Plus size={18} />
                         Client nou
                       </button>
+                      <div className="hero-art" aria-hidden="true">
+                        <BrandMark />
+                        <span className="hero-orbit orbit-one" />
+                        <span className="hero-orbit orbit-two" />
+                      </div>
                     </div>
-                    <div className="stats-grid">
+                    <div className="stats-grid dashboard-stats">
                       {[
                         {
                           label: "Clienții mei",
@@ -476,12 +517,14 @@ export default function App() {
                           <div className="section-heading">
                             <div>
                               <h2>
-                                Pe lista ta de astăzi{" "}
+                                De făcut, cu grijă.{" "}
                                 <span className="count-pill">
                                   {overdue.length + due.length}
                                 </span>
                               </h2>
-                              <p>Pașii mici care duc relațiile mai departe.</p>
+                              <p>
+                                Conversații de continuat. Promisiuni de păstrat.
+                              </p>
                             </div>
                             <NavLink to="/followups" className="text-link">
                               Vezi toate <ArrowRight size={16} />
@@ -714,6 +757,25 @@ export default function App() {
           <span>Uz intern · Date confidențiale</span>
         </footer>
       </div>
+      <MobileNavigation
+        user={user}
+        storeName={me?.store.name ?? "Magazinul tău"}
+        open={mobile}
+        onToggle={() => setMobile((v) => !v)}
+        onClose={() => setMobile(false)}
+        onCreate={() => {
+          setInitialPhone("");
+          setCreate(true);
+        }}
+        onLogout={() => {
+          void api("auth/logout", {})
+            .catch(() => {})
+            .finally(() => {
+              setMe(null);
+              qc.clear();
+            });
+        }}
+      />
       {visit && (
         <VisitForm
           customer={visit}

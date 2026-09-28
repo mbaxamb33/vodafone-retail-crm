@@ -69,6 +69,12 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 function dialogs() {
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value: function () {
+      this.removeAttribute("open");
+    },
+  });
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
     configurable: true,
     value: function () {

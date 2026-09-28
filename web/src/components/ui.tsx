@@ -9,7 +9,12 @@ export function Avatar({
   small?: boolean;
 }) {
   return (
-    <span className={"avatar " + (small ? "small" : "")}>{initials(name)}</span>
+    <span
+      data-tone={name.charCodeAt(0) % 5}
+      className={"avatar " + (small ? "small" : "")}
+    >
+      {initials(name)}
+    </span>
   );
 }
 export function Empty({ children }: { children: ReactNode }) {
@@ -25,19 +30,29 @@ export function Modal({
   title,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
-    ref.current?.showModal();
+    const dialog = ref.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialog?.showModal();
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+    };
   }, []);
   return (
     <dialog
       ref={ref}
+      className={className}
       aria-labelledby={titleId}
       onCancel={onClose}
       onClick={(e) => {
@@ -53,7 +68,7 @@ export function Modal({
           <X />
         </button>
       </div>
-      {children}
+      <div className="modal-body">{children}</div>
     </dialog>
   );
 }

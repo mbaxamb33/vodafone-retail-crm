@@ -106,11 +106,38 @@ export default function Pipeline({
           {update.error.message}
         </p>
       )}
-      <div className="kanban">
+      <div className="mobile-stage-filter">
+        <label htmlFor="mobile-stage">Etapa conversației</label>
+        <select
+          id="mobile-stage"
+          value={stage}
+          onChange={(e) => {
+            const next = new URLSearchParams(params);
+            if (e.target.value) next.set("stage", e.target.value);
+            else next.delete("stage");
+            setParams(next);
+          }}
+        >
+          <option value="">Toate etapele</option>
+          {Object.entries(stages).map(([id, label]) => (
+            <option key={id} value={id}>
+              {label} · {list.filter((o) => o.stage === id).length}
+            </option>
+          ))}
+        </select>
+        <span>
+          {list.filter((o) => !stage || o.stage === stage).length} oportunități
+        </span>
+      </div>
+      <div className="kanban" data-filtered={Boolean(stage)}>
         {Object.entries(stages)
           .filter(([id]) => !stage || id === stage)
           .map(([id, label]) => (
-            <section key={id} className="kanban-column">
+            <section
+              key={id}
+              className="kanban-column"
+              data-empty={!list.some((o) => o.stage === id)}
+            >
               <h3>
                 <span
                   className={"stage-square " + (id === "offer" ? "s3" : "s1")}
@@ -218,6 +245,11 @@ export default function Pipeline({
             </section>
           ))}
       </div>
+      {!list.length && (
+        <div className="pipeline-empty">
+          Nicio oportunitate pentru filtrele selectate.
+        </div>
+      )}
       {action && (
         <FollowUpForm
           customerId={action.opportunity.customerId}

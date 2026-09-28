@@ -60,42 +60,49 @@ export default function CustomerList({
             }}
           />
         </div>
-        <SlidersHorizontal size={18} />
-        {!portfolio && (
-          <select
-            aria-label="Responsabilitate"
-            value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
-            }}
-          >
-            <option value="">Toți clienții</option>
-            <option value="owned">Alocați</option>
-            <option value="pool">În portofoliul magazinului</option>
-            <option value="unassigned">Fără urmărire activă</option>
-          </select>
-        )}
-        <select
-          aria-label="Ordonează"
-          value={sort}
-          onChange={(e) => setSort(e.target.value)}
-        >
-          <option value="recent">Interacțiune recentă</option>
-          <option value="followup">Următorul follow-up</option>
-          <option value="newest">Clienți noi</option>
-          <option value="name">Nume</option>
-        </select>
-        {(q || filter) && (
-          <button
-            className="button subtle"
-            onClick={() => {
-              setQ("");
-              setFilter("");
-            }}
-          >
-            Resetează filtrele
-          </button>
-        )}
+        <details className="filter-options">
+          <summary>
+            <SlidersHorizontal size={18} />
+            Filtre și sortare{filter && <span className="filter-active-dot" />}
+          </summary>
+          <div className="filter-options-body">
+            {!portfolio && (
+              <select
+                aria-label="Responsabilitate"
+                value={filter}
+                onChange={(e) => {
+                  setFilter(e.target.value);
+                }}
+              >
+                <option value="">Toți clienții</option>
+                <option value="owned">Alocați</option>
+                <option value="pool">În portofoliul magazinului</option>
+                <option value="unassigned">Fără urmărire activă</option>
+              </select>
+            )}
+            <select
+              aria-label="Ordonează"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            >
+              <option value="recent">Interacțiune recentă</option>
+              <option value="followup">Următorul follow-up</option>
+              <option value="newest">Clienți noi</option>
+              <option value="name">Nume</option>
+            </select>
+            {(q || filter) && (
+              <button
+                className="button subtle"
+                onClick={() => {
+                  setQ("");
+                  setFilter("");
+                }}
+              >
+                Resetează filtrele
+              </button>
+            )}
+          </div>
+        </details>
       </div>
       {list.isError && (
         <div className="error-panel">
