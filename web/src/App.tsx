@@ -443,7 +443,7 @@ export default function App() {
                           }).format(new Date())}
                         </div>
                         <h1>
-                          Bună, {user.name.split(" ")[0]}
+                          Stay connected, {user.name.split(" ")[0]}
                           <span className="greeting-dot">.</span>
                         </h1>
                         <p>O nouă zi. Noi conversații care contează.</p>
