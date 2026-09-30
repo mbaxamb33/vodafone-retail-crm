@@ -156,9 +156,7 @@ describe("retail workflows", () => {
     expect(
       screen.getByRole("heading", { name: "Oamenii din spatele relațiilor." }),
     ).toBeTruthy();
-    expect(
-      await screen.findByRole("button", { name: "Reasignează" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reasignează" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Activitate" }));
     await screen.findByText(/0 vizite/);
     expect(
@@ -234,7 +232,7 @@ describe("retail workflows", () => {
     );
     mount(
       <CreateCustomer
-        initialPhone="0000 0000"
+        initialPhone="0722 000 999"
         onClose={vi.fn()}
         onSaved={vi.fn()}
       />,
@@ -261,9 +259,7 @@ describe("retail workflows", () => {
     mount(
       <OwnershipEditor customer={pool} user={employee} users={data.users} />,
     );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Alocă un responsabil" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Îl iau eu" }));
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Responsabil nou" }),
       "e",
@@ -298,6 +294,7 @@ describe("retail workflows", () => {
           type: "Call",
           due: "2026-10-02",
           status: "open",
+          kind: "task",
         }}
         onClose={close}
       />,
@@ -315,5 +312,99 @@ describe("retail workflows", () => {
       { status: "unreachable", due: "2026-10-02" },
       "PATCH",
     );
+  });
+  it("creates a phone-only customer without inventing a name", async () => {
+    dialogs();
+    vi.mocked(api).mockResolvedValue({ ...data.customers[0], name: "" });
+    const saved = vi.fn();
+    mount(
+      <CreateCustomer
+        initialPhone="0722 000 999"
+        onClose={vi.fn()}
+        onSaved={saved}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Adaugă clientul" }),
+    );
+    await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    expect(api).toHaveBeenCalledWith("customers", {
+      name: "",
+      phone: "0722 000 999",
+    });
+  });
+  it("progressively reveals resolution details and keeps dates optional", async () => {
+    dialogs();
+    vi.mocked(api).mockImplementation(async (path) =>
+      path === "catalog"
+        ? { visitReasons: [], nextActions: [], productCategories: [] }
+        : { ok: true },
+    );
+    mount(
+      <VisitForm
+        customer={data.customers[0]}
+        user={employee}
+        users={data.users}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("Data revenirii")).toBeNull();
+    expect(screen.queryByLabelText("Tipul solicitării")).toBeNull();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rezolvarea solicitării" }),
+    );
+    expect(screen.getByLabelText("Cine a venit?")).toBeTruthy();
+    await userEvent.selectOptions(
+      screen.getByLabelText("Tipul solicitării"),
+      "other",
+    );
+    await userEvent.selectOptions(
+      screen.getByLabelText("Starea solicitării"),
+      "pending",
+    );
+    await userEvent.click(
+      screen.getByLabelText("Amintește-mi să verific rezolvarea"),
+    );
+    expect(screen.getByLabelText("Când verifici problema?")).toBeTruthy();
+    expect(screen.queryByLabelText("Data revenirii")).toBeNull();
+    await userEvent.click(
+      screen.getByLabelText("Am stabilit o dată împreună cu clientul"),
+    );
+    expect(screen.getByLabelText("Data revenirii")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Rezolvarea solicitării" }),
+    );
+    expect(screen.queryByLabelText("Când verifici problema?")).toBeNull();
+  });
+  it("lets a manager return a colleague's customer to the pool but not take it", async () => {
+    mount(
+      <OwnershipEditor
+        customer={data.customers[0]}
+        user={manager}
+        users={data.users}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Îl dau magazinului" }),
+    );
+    const options = screen
+      .getAllByRole("option")
+      .map((o) => o.textContent ?? "");
+    expect(options).toEqual(["Îl dau magazinului"]);
+  });
+  it("tells an employee only the owner or a manager can return a colleague's customer", () => {
+    const colleague = { ...employee, id: "x", name: "Alt coleg" };
+    mount(
+      <OwnershipEditor
+        customer={data.customers[0]}
+        user={colleague}
+        users={data.users}
+      />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(
+      screen.getByText(/Doar responsabilul sau managerul poate returna/),
+    ).toBeTruthy();
   });
 });

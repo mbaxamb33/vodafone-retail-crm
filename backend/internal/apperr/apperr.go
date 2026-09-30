@@ -38,6 +38,7 @@ var (
 	ErrVisitNotFound          = New(http.StatusNotFound, "VISIT_NOT_FOUND", "Vizita nu a fost găsită.")
 	ErrInvalidStageTransition = New(http.StatusConflict, "INVALID_STAGE_TRANSITION", "Oportunitatea este închisă și nu mai poate fi modificată.")
 	ErrConflict               = New(http.StatusConflict, "CONFLICT", "Înregistrarea este deja închisă.")
+	ErrCustomerAlreadyOwned   = New(http.StatusConflict, "CUSTOMER_ALREADY_OWNED", "Clientul are deja un responsabil. Îl poate returna magazinului doar acesta.")
 	ErrEmailTaken             = New(http.StatusConflict, "EMAIL_TAKEN", "Există deja un cont cu acest email.")
 	ErrPayloadTooLarge        = New(http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Cererea este prea mare.")
 	ErrRateLimited            = New(http.StatusTooManyRequests, "RATE_LIMITED", "Prea multe încercări. Încearcă din nou peste câteva minute.")

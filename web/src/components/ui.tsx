@@ -10,10 +10,10 @@ export function Avatar({
 }) {
   return (
     <span
-      data-tone={name.charCodeAt(0) % 5}
+      data-tone={(name.charCodeAt(0) || 0) % 5}
       className={"avatar " + (small ? "small" : "")}
     >
-      {initials(name)}
+      {/^[+\d]/.test(name) ? "☎" : initials(name) || "☎"}
     </span>
   );
 }

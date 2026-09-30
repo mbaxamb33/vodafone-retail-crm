@@ -26,6 +26,7 @@ import {
   type FollowUp,
 } from "../../domain";
 import OwnershipEditor from "./OwnershipEditor";
+import { useNextStepLabel } from "../../hooks";
 import FollowUpForm from "../followups/FollowUpForm";
 export default function Profile({
   id,
@@ -41,6 +42,7 @@ export default function Profile({
   onVisit: (c: Customer) => void;
 }) {
   const [offset, setOffset] = useState(0);
+  const stepLabel = useNextStepLabel();
   const [tab, setTab] = useState("history");
   const [action, setAction] = useState<{
     opportunity?: Opportunity;
@@ -86,10 +88,10 @@ export default function Profile({
       </button>
       <div className="page-heading profile-page-heading">
         <div className="profile-hero">
-          <Avatar name={customer.name} />
+          <Avatar name={customer.name || customer.phone} />
           <div>
             <span className="eyebrow">RELAȚIA CU CLIENTUL</span>
-            <h1>{customer.name}</h1>
+            <h1>{customer.name || customer.phone}</h1>
             {customer.status !== "active" && (
               <span className="tag">
                 {customer.status === "archived" ? "Arhivat" : "Anonimizat"}
@@ -186,7 +188,11 @@ export default function Profile({
                       </div>
                     ) : (
                       <div className="missing-action">
-                        <span>Fără pas următor</span>
+                        <span>
+                          {o.nextStep
+                            ? `Stabilit cu clientul: ${stepLabel(o.nextStep)} · fără dată`
+                            : "Fără pas următor"}
+                        </span>
                         {(user.role === "manager" ||
                           o.employeeId === user.id) && (
                           <button
@@ -246,6 +252,46 @@ export default function Profile({
                         ))}
                       </div>
                       {v.notes && <p className="visit-note">{v.notes}</p>}
+                      {v.details?.nextAction && (
+                        <div className="visit-detail-panel">
+                          {v.details.resolution && (
+                            <p>
+                              <strong>Solicitare:</strong>{" "}
+                              {v.details.resolution.type === "invoice"
+                                ? `Încasare factură · ${v.details.resolution.holder === "holder" ? "Titular" : "Netitular"}`
+                                : `Alte solicitări · ${v.details.resolution.status === "resolved" ? "Rezolvat" : v.details.resolution.status === "pending" ? "În așteptare · are caz deschis" : "Nerezolvat"}`}
+                            </p>
+                          )}
+                          <p>
+                            <strong>Stabilit cu clientul:</strong>{" "}
+                            {v.details.nextActionLabel}
+                            {v.details.actionDetails &&
+                              ` · ${v.details.actionDetails}`}
+                          </p>
+                          {v.details.contactConsent && (
+                            <p>Acord de contact exprimat în această vizită.</p>
+                          )}
+                          <p>
+                            {v.details.agreedDate
+                              ? `Dată stabilită cu clientul: ${date(v.details.due)}`
+                              : "Fără dată stabilită cu clientul."}
+                          </p>
+                          {q.data.followUps
+                            .filter(
+                              (f) =>
+                                f.kind === "reminder" &&
+                                f.sourceVisitId === v.id,
+                            )
+                            .map((f) => (
+                              <p key={f.id}>
+                                <strong>
+                                  Reminder intern · {date(f.due)}:
+                                </strong>{" "}
+                                {f.notes}
+                              </p>
+                            ))}
+                        </div>
+                      )}
                     </article>
                   ))
                 : q.data.audit.map((a) => (
@@ -355,7 +401,7 @@ export default function Profile({
       {action && (
         <FollowUpForm
           customerId={id}
-          customerName={customer.name}
+          customerName={customer.name || customer.phone}
           opportunityId={action.opportunity?.id}
           followUp={action.followUp}
           user={user}

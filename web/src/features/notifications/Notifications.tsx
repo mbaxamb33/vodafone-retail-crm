@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, CheckCheck } from "lucide-react";
@@ -9,6 +10,7 @@ export default function Notifications({
 }: {
   onOpen: (customerId: string) => void;
 }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
@@ -70,12 +72,18 @@ export default function Notifications({
               onClick={() => {
                 if (!n.readAt) read.mutate([n.id]);
                 if (n.customerId) onOpen(n.customerId);
+                if (n.kind === "experience") navigate("/#experience");
                 setOpen(false);
               }}
             >
               {!n.readAt && <span className="red-dot" aria-label="Necitită" />}
               <span>
-                <strong>{n.customerName || "Client"}</strong>
+                <strong>
+                  {n.customerName ||
+                    (n.kind === "experience"
+                      ? "Experiența clienților"
+                      : "Client")}
+                </strong>
                 <small>{n.message}</small>
               </span>
               <time>{date(n.createdAt)}</time>

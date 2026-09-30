@@ -2,6 +2,7 @@ package crm_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func TestVisitIsAtomicAndHistorical(t *testing.T) {
 
 	// A failure part-way through must leave nothing behind.
 	failing := crm.NewService(failAfterVisit{e.db}, crm.WithClock(func() time.Time { return e.now }))
-	_, err := failing.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "Call", Due: "2026-10-01"})
+	_, err := failing.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "thinking", AgreedDate: true, Due: "2026-10-01"})
 	if err == nil {
 		t.Fatal("expected failure")
 	}
@@ -72,7 +73,7 @@ func TestVisitIsAtomicAndHistorical(t *testing.T) {
 		t.Fatalf("partial visit persisted: %+v", p)
 	}
 
-	res, err := e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{ReasonCode: "renewal", Steps: []int{6, 5}, Notes: "Notă", Ownership: "owned", NextAction: "Call", Due: "2026-10-01",
+	res, err := e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{ReasonCode: "renewal", Steps: []int{6, 5}, Notes: "Notă", Ownership: "owned", NextAction: "thinking", AgreedDate: true, Due: "2026-10-01",
 		Opportunities: []crm.OpportunityDraft{{Product: "Red Unlimited", Category: "mobile"}}})
 	must(t, err)
 	if got := res.Visit.Steps; len(got) != 2 || got[0] != 5 || got[1] != 6 || res.Visit.FurthestStep != 6 {
@@ -81,24 +82,70 @@ func TestVisitIsAtomicAndHistorical(t *testing.T) {
 	if res.Visit.Reason != "Reînnoire abonament" {
 		t.Fatalf("reason label: %q", res.Visit.Reason)
 	}
-	if res.Opportunities[0].Stage != crm.StageIdentified {
-		t.Fatal("visit progress leaked into opportunity stage")
+	if res.Opportunities[0].Stage != crm.StageIdentified || res.Opportunities[0].NextStep != "thinking" {
+		t.Fatal("visit progress leaked into opportunity stage, or next step not kept")
 	}
-	if res.FollowUp == nil || res.FollowUp.OpportunityID != res.Opportunities[0].ID {
-		t.Fatal("single opportunity must be linked to the next action")
+	if res.FollowUp == nil || res.FollowUp.OpportunityID != res.Opportunities[0].ID || res.FollowUp.Kind != crm.FollowUpAgreed || res.FollowUp.Type != "Se gândește și revine clientul" {
+		t.Fatalf("agreed follow-up: %+v", res.FollowUp)
 	}
 	p, err = e.svc.CustomerProfile(e.ctx, e.st.Mgr, c.ID, 0)
 	must(t, err)
 	if p.Customer.OwnerID != e.st.Ioana.ID || p.Customer.LastInteractionAt == nil || p.LastVisit == nil || len(p.OwnershipHistory) != 1 {
 		t.Fatalf("profile after visit: %+v", p)
 	}
+	if d := p.LastVisit.Details; d.NextAction != "thinking" || d.NextActionLabel != "Se gândește și revine clientul" || !d.AgreedDate || d.Due != "2026-10-01" {
+		t.Fatalf("visit details not stored: %+v", d)
+	}
 
 	// Two opportunities: the next action is not attached to either.
-	res, err = e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, NextAction: "Call", Due: "2026-10-02",
+	res, err = e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, NextAction: "none", AgreedDate: true, Due: "2026-10-02",
 		Opportunities: []crm.OpportunityDraft{{Product: "A"}, {Product: "B"}}})
 	must(t, err)
-	if res.FollowUp.OpportunityID != "" || len(res.Opportunities) != 2 {
+	if res.FollowUp.OpportunityID != "" || len(res.Opportunities) != 2 || res.FollowUp.Type != "Revenire stabilită cu clientul" || res.Opportunities[0].NextStep != "" {
 		t.Fatal("ambiguous opportunity link")
+	}
+}
+
+func TestVisitOutcomesWithoutDate(t *testing.T) {
+	e := setup(t)
+	c := e.customer(t, e.st.Ioana, "", "0722 111 333")
+	if c.Name != "" {
+		t.Fatal("a name must never be invented")
+	}
+	// No agreed date: the opportunity and next step are kept, but nothing is scheduled.
+	res, err := e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0, 1, 3}, NextAction: "keep_in_touch",
+		Resolution:    &crm.ResolutionInput{Type: "other", Status: "pending"},
+		Reminder:      &crm.ReminderInput{Due: "2026-10-28", Notes: "S-a rezolvat cazul?"},
+		Opportunities: []crm.OpportunityDraft{{Product: "Internet"}}})
+	must(t, err)
+	if res.FollowUp != nil || res.Reminder == nil || res.Reminder.Kind != crm.FollowUpReminder || res.Reminder.Notes != "S-a rezolvat cazul?" {
+		t.Fatalf("agreed follow-up must not exist, reminder must: %+v %+v", res.FollowUp, res.Reminder)
+	}
+	d := res.Visit.Details
+	if !d.ContactConsent || d.AgreedDate || d.Resolution == nil || d.Resolution.Status != "pending" || res.Opportunities[0].NextStep != "keep_in_touch" {
+		t.Fatalf("details: %+v", d)
+	}
+	// The consent is recorded with author and time in the audit log.
+	p, err := e.svc.CustomerProfile(e.ctx, e.st.Mgr, c.ID, 0)
+	must(t, err)
+	found := false
+	for _, a := range p.Audit {
+		var data struct {
+			ContactConsent bool `json:"contactConsent"`
+		}
+		_ = json.Unmarshal(a.Data, &data)
+		if a.Action == "visit.recorded" && data.ContactConsent && a.ActorID == e.st.Ioana.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("contact consent not audited")
+	}
+	res, err = e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{1}, NextAction: "other", ActionDetails: "Aduce contractul vechi",
+		Resolution: &crm.ResolutionInput{Type: "invoice", Holder: "other"}})
+	must(t, err)
+	if res.Visit.Details.Resolution.Holder != "other" || res.Visit.Details.ActionDetails != "Aduce contractul vechi" || res.Visit.Details.ContactConsent {
+		t.Fatalf("invoice visit: %+v", res.Visit.Details)
 	}
 }
 
@@ -113,34 +160,44 @@ type failingTx struct{ crm.Tx }
 
 func (failingTx) InsertFollowUp(context.Context, crm.FollowUp) error { return errors.New("disk full") }
 
+// claim puts a customer in the owner's portfolio the only permitted way: from the pool.
+func (e *env) claim(t *testing.T, owner crm.User, customerID string) {
+	t.Helper()
+	_, err := e.svc.ChangeOwnership(e.ctx, owner, customerID, crm.OwnershipInput{Ownership: "owned"})
+	must(t, err)
+}
+
 func TestOwnershipRules(t *testing.T) {
 	e := setup(t)
 	s := e.st
+	none := crm.User{}
 	cases := []struct {
-		name  string
-		actor crm.User
-		start crm.OwnershipInput // applied by the manager first
-		in    crm.OwnershipInput
-		want  error
-		owner string
+		name    string
+		claimer crm.User // who owns the customer before the change; zero means pool
+		actor   crm.User
+		in      crm.OwnershipInput
+		want    error
+		owner   string
 	}{
-		{"employee claims pool customer", s.Ioana, crm.OwnershipInput{Ownership: "pool"}, crm.OwnershipInput{Ownership: "owned"}, nil, s.Ioana.ID},
-		{"employee cannot assign colleague", s.Ioana, crm.OwnershipInput{Ownership: "pool"}, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID}, apperr.ErrForbidden, ""},
-		{"employee cannot take colleague's customer", s.Ioana, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID}, crm.OwnershipInput{Ownership: "owned"}, apperr.ErrForbidden, s.Andrei.ID},
-		{"employee cannot release colleague's customer", s.Ioana, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID}, crm.OwnershipInput{Ownership: "pool"}, apperr.ErrForbidden, s.Andrei.ID},
-		{"employee releases own customer", s.Ioana, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Ioana.ID}, crm.OwnershipInput{Ownership: "unassigned"}, nil, ""},
-		{"manager reassigns", s.Mgr, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Ioana.ID}, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID}, nil, s.Andrei.ID},
-		{"unknown employee", s.Mgr, crm.OwnershipInput{Ownership: "pool"}, crm.OwnershipInput{Ownership: "owned", OwnerID: crm.NewID()}, apperr.ErrEmployeeNotFound, ""},
-		{"employee of another store", s.Mgr, crm.OwnershipInput{Ownership: "pool"}, crm.OwnershipInput{Ownership: "owned", OwnerID: e.other.Ioana.ID}, apperr.ErrEmployeeNotFound, ""},
-		{"pool with owner", s.Mgr, crm.OwnershipInput{Ownership: "pool"}, crm.OwnershipInput{Ownership: "pool", OwnerID: s.Ioana.ID}, apperr.ErrValidation, ""},
-		{"manager of another store", e.other.Mgr, crm.OwnershipInput{Ownership: "pool"}, crm.OwnershipInput{Ownership: "pool"}, apperr.ErrCustomerNotFound, ""},
+		{"employee claims pool customer", none, s.Ioana, crm.OwnershipInput{Ownership: "owned"}, nil, s.Ioana.ID},
+		{"nobody hands a customer to a colleague", none, s.Ioana, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID}, apperr.ErrForbidden, ""},
+		{"manager cannot assign either", none, s.Mgr, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID}, apperr.ErrForbidden, ""},
+		{"employee cannot take colleague's customer", s.Andrei, s.Ioana, crm.OwnershipInput{Ownership: "owned"}, apperr.ErrCustomerAlreadyOwned, s.Andrei.ID},
+		{"manager cannot take colleague's customer", s.Andrei, s.Mgr, crm.OwnershipInput{Ownership: "owned"}, apperr.ErrCustomerAlreadyOwned, s.Andrei.ID},
+		{"employee cannot release colleague's customer", s.Andrei, s.Ioana, crm.OwnershipInput{Ownership: "pool"}, apperr.ErrForbidden, s.Andrei.ID},
+		{"owner returns own customer", s.Ioana, s.Ioana, crm.OwnershipInput{Ownership: "pool"}, nil, ""},
+		{"manager returns colleague's customer to pool", s.Ioana, s.Mgr, crm.OwnershipInput{Ownership: "pool"}, nil, ""},
+		{"unassigned is no longer offered", s.Ioana, s.Ioana, crm.OwnershipInput{Ownership: "unassigned"}, apperr.ErrValidation, s.Ioana.ID},
+		{"pool with owner", s.Ioana, s.Ioana, crm.OwnershipInput{Ownership: "pool", OwnerID: s.Ioana.ID}, apperr.ErrValidation, s.Ioana.ID},
+		{"manager of another store", none, e.other.Mgr, crm.OwnershipInput{Ownership: "owned"}, apperr.ErrCustomerNotFound, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cust := e.customer(t, s.Mgr, "Client "+c.name[:4], "0722 000 999")
-			_, err := e.svc.ChangeOwnership(e.ctx, s.Mgr, cust.ID, c.start)
-			must(t, err)
-			_, err = e.svc.ChangeOwnership(e.ctx, c.actor, cust.ID, c.in)
+			cust := e.customer(t, s.Mgr, "", "0722 000 999")
+			if c.claimer.ID != "" {
+				e.claim(t, c.claimer, cust.ID)
+			}
+			_, err := e.svc.ChangeOwnership(e.ctx, c.actor, cust.ID, c.in)
 			if c.want == nil {
 				must(t, err)
 			} else {
@@ -153,18 +210,42 @@ func TestOwnershipRules(t *testing.T) {
 			}
 		})
 	}
+	// Claiming during a visit follows the same rule.
+	cust := e.customer(t, s.Mgr, "", "0722 000 998")
+	e.claim(t, s.Andrei, cust.ID)
+	_, err := e.svc.RecordVisit(e.ctx, s.Ioana, cust.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned"})
+	is(t, err, apperr.ErrCustomerAlreadyOwned)
+	_, err = e.svc.RecordVisit(e.ctx, s.Ioana, cust.ID, crm.VisitInput{Steps: []int{0}, Ownership: "pool"})
+	is(t, err, apperr.ErrValidation)
+}
+
+func TestReleasePortfolio(t *testing.T) {
+	e := setup(t)
+	a := e.customer(t, e.st.Andrei, "", "0722 000 501")
+	b := e.customer(t, e.st.Andrei, "", "0722 000 502")
+	e.claim(t, e.st.Andrei, a.ID)
+	e.claim(t, e.st.Andrei, b.ID)
+	n, err := e.svc.ReleasePortfolio(e.ctx, e.st.Andrei)
+	must(t, err)
+	pool, err := e.svc.ListCustomers(e.ctx, e.st.Ioana, crm.CustomerFilter{Ownership: "pool"})
+	must(t, err)
+	if n != 2 || pool.Total != 2 {
+		t.Fatalf("released %d, pool %d", n, pool.Total)
+	}
 }
 
 func TestOwnershipChangeIsNotAnInteraction(t *testing.T) {
 	e := setup(t)
 	s := e.st
 	c := e.customer(t, s.Ioana, "Ion Ionescu", "0722 000 100")
-	_, err := e.svc.RecordVisit(e.ctx, s.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "Call", Due: "2026-10-01"})
+	_, err := e.svc.RecordVisit(e.ctx, s.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "thinking", AgreedDate: true, Due: "2026-10-01"})
 	must(t, err)
 	before, _ := e.svc.CustomerProfile(e.ctx, s.Mgr, c.ID, 0)
 	e.now = e.now.Add(time.Hour)
-	_, err = e.svc.ChangeOwnership(e.ctx, s.Mgr, c.ID, crm.OwnershipInput{Ownership: "owned", OwnerID: s.Andrei.ID})
+	_, err = e.svc.ChangeOwnership(e.ctx, s.Mgr, c.ID, crm.OwnershipInput{Ownership: "pool"})
 	must(t, err)
+	e.now = e.now.Add(time.Minute)
+	e.claim(t, s.Andrei, c.ID)
 	after, _ := e.svc.CustomerProfile(e.ctx, s.Mgr, c.ID, 0)
 	if after.Total != before.Total || !after.Customer.LastInteractionAt.Equal(*before.Customer.LastInteractionAt) {
 		t.Fatal("ownership change invented an interaction")
@@ -172,27 +253,28 @@ func TestOwnershipChangeIsNotAnInteraction(t *testing.T) {
 	if after.FollowUps[0].EmployeeID != s.Ioana.ID {
 		t.Fatal("ownership change silently moved tasks")
 	}
-	if len(after.OwnershipHistory) != 2 || len(after.Audit) < 4 {
+	if len(after.OwnershipHistory) != 3 || len(after.Audit) < 5 {
 		t.Fatalf("ownership history not preserved: %d", len(after.OwnershipHistory))
 	}
-	// Both employees are told about the reassignment; the manager (actor) is not.
-	for _, u := range []crm.User{s.Andrei, s.Ioana} {
-		n, err := e.svc.Notifications(e.ctx, u, true)
-		must(t, err)
-		if n.Unread != 1 || n.Items[0].CustomerName != "Ion Ionescu" {
-			t.Fatalf("notifications for %s: %+v", u.Name, n)
-		}
+	// The previous owner is told; people acting on their own behalf are not.
+	n, err := e.svc.Notifications(e.ctx, s.Ioana, true)
+	must(t, err)
+	if n.Unread != 1 || n.Items[0].Kind != "customer_reassigned" || n.Items[0].CustomerName != "Ion Ionescu" {
+		t.Fatalf("previous owner notifications: %+v", n)
+	}
+	if n, _ := e.svc.Notifications(e.ctx, s.Andrei, true); n.Unread != 0 {
+		t.Fatal("claimer notified about their own claim")
 	}
 	// A colleague's visit keeps ownership and notifies the owner.
 	e.now = e.now.Add(time.Minute)
-	_, err = e.svc.RecordVisit(e.ctx, s.Ioana, c.ID, crm.VisitInput{Steps: []int{1}})
+	_, err = e.svc.RecordVisit(e.ctx, s.Ioana, c.ID, crm.VisitInput{Steps: []int{1}, Resolution: &crm.ResolutionInput{Type: "other", Status: "resolved"}})
 	must(t, err)
 	got, _ := e.svc.CustomerProfile(e.ctx, s.Ioana, c.ID, 0)
 	if got.Customer.OwnerID != s.Andrei.ID || len(got.Audit) != 0 {
 		t.Fatal("colleague visit changed ownership, or employee sees audit")
 	}
-	n, _ := e.svc.Notifications(e.ctx, s.Andrei, true)
-	if n.Unread != 2 || n.Items[0].Kind != "customer_returned" {
+	n, _ = e.svc.Notifications(e.ctx, s.Andrei, true)
+	if n.Unread != 1 || n.Items[0].Kind != "customer_returned" {
 		t.Fatalf("owner not told the customer returned: %+v", n.Items)
 	}
 	must(t, e.svc.MarkNotificationsRead(e.ctx, s.Andrei, nil))
@@ -316,7 +398,7 @@ func TestOpportunityTransitions(t *testing.T) {
 func TestStoreIsolation(t *testing.T) {
 	e := setup(t)
 	c := e.customer(t, e.st.Ioana, "Secret Client", "0722 000 400")
-	res, err := e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, NextAction: "Call", Due: "2026-10-01", Opportunities: []crm.OpportunityDraft{{Product: "X"}}})
+	res, err := e.svc.RecordVisit(e.ctx, e.st.Ioana, c.ID, crm.VisitInput{Steps: []int{0}, NextAction: "thinking", AgreedDate: true, Due: "2026-10-01", Opportunities: []crm.OpportunityDraft{{Product: "X"}}})
 	must(t, err)
 	outsider := e.other.Mgr
 	_, err = e.svc.CustomerProfile(e.ctx, outsider, c.ID, 0)
@@ -493,9 +575,11 @@ func TestWorkspaceAndDashboardScope(t *testing.T) {
 	mine := e.customer(t, s.Ioana, "Clientul Ioanei", "0722 000 700")
 	theirs := e.customer(t, s.Andrei, "Clientul lui Andrei", "0722 000 701")
 	e.customer(t, s.Andrei, "Client Magazin", "0722 000 702")
-	_, err := e.svc.RecordVisit(e.ctx, s.Ioana, mine.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "Call", Due: "2026-09-28", Opportunities: []crm.OpportunityDraft{{Product: "A"}}})
+	_, err := e.svc.RecordVisit(e.ctx, s.Ioana, mine.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "thinking", AgreedDate: true, Due: "2026-09-28", Opportunities: []crm.OpportunityDraft{{Product: "A"}}})
 	must(t, err)
-	_, err = e.svc.RecordVisit(e.ctx, s.Andrei, theirs.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned", NextAction: "Call", Due: "2026-09-20"})
+	_, err = e.svc.RecordVisit(e.ctx, s.Andrei, theirs.ID, crm.VisitInput{Steps: []int{0}, Ownership: "owned"})
+	must(t, err)
+	_, err = e.svc.ScheduleFollowUp(e.ctx, s.Andrei, crm.FollowUpInput{CustomerID: theirs.ID, Type: "Sună clientul", Due: "2026-09-20"})
 	must(t, err)
 
 	ws, err := e.svc.Workspace(e.ctx, s.Ioana)
@@ -517,5 +601,83 @@ func TestWorkspaceAndDashboardScope(t *testing.T) {
 	must(t, err)
 	if d.Overdue != 1 {
 		t.Fatal("overdue count")
+	}
+}
+
+func TestExperienceFollowUps(t *testing.T) {
+	e := setup(t)
+	s := e.st
+	a := e.customer(t, s.Ioana, "", "0722 000 801")
+	b := e.customer(t, s.Ioana, "Ana", "0722 000 802")
+	// The feature starts on the day the migration ran; move it back so earlier visits count.
+	_, err := e.db.Pool.Exec(e.ctx, `UPDATE stores SET experience_since = '2026-09-01'`)
+	must(t, err)
+	visit := func(at string, u crm.User, id string) {
+		t.Helper()
+		e.now, _ = time.Parse(time.RFC3339, at)
+		_, err := e.svc.RecordVisit(e.ctx, u, id, crm.VisitInput{Steps: []int{0}})
+		must(t, err)
+	}
+	visit("2026-09-19T10:00:00Z", s.Ioana, a.ID) // outside the 7-day window
+	visit("2026-09-27T08:00:00Z", s.Ioana, a.ID)
+	visit("2026-09-27T15:00:00Z", s.Ioana, a.ID) // same local day: one task
+	visit("2026-09-27T21:30:00Z", s.Ioana, b.ID) // 28 Sept in Bucharest: today, not yet listed
+	visit("2026-09-27T12:00:00Z", s.Andrei, b.ID)
+	e.now, _ = time.Parse(time.RFC3339, "2026-09-28T09:00:00Z")
+
+	tasks, err := e.svc.Experience(e.ctx, s.Ioana)
+	must(t, err)
+	if len(tasks) != 1 || tasks[0].CustomerID != a.ID || tasks[0].Day != "2026-09-27" || tasks[0].Status != "open" {
+		t.Fatalf("tasks: %+v", tasks)
+	}
+	n, err := e.svc.Notifications(e.ctx, s.Ioana, true)
+	must(t, err)
+	if n.Unread != 1 || n.Items[0].Kind != "experience" {
+		t.Fatalf("daily notice: %+v", n)
+	}
+	if n, _ = e.svc.Notifications(e.ctx, s.Ioana, true); n.Unread != 1 {
+		t.Fatal("the daily notice must be created once")
+	}
+	_, err = e.svc.UpdateExperience(e.ctx, s.Ioana, tasks[0].ID, "unreachable")
+	must(t, err)
+	_, err = e.svc.UpdateExperience(e.ctx, s.Andrei, tasks[0].ID, "done")
+	is(t, err, apperr.ErrNotFound)
+	_, err = e.svc.UpdateExperience(e.ctx, s.Ioana, tasks[0].ID, "maybe")
+	is(t, err, apperr.ErrValidation)
+	tasks, _ = e.svc.Experience(e.ctx, s.Ioana)
+	if tasks[0].Status != "unreachable" {
+		t.Fatal("unreachable is still pending")
+	}
+	_, err = e.svc.UpdateExperience(e.ctx, s.Ioana, tasks[0].ID, "done")
+	must(t, err)
+	// Tomorrow the 28 Sept visit appears; done tasks stay visible so they can be undone.
+	e.now = e.now.Add(24 * time.Hour)
+	tasks, _ = e.svc.Experience(e.ctx, s.Ioana)
+	if len(tasks) != 2 || tasks[0].Status != "done" || tasks[1].CustomerID != b.ID {
+		t.Fatalf("next day: %+v", tasks)
+	}
+	// After a week the old day drops off the list.
+	e.now = e.now.Add(7 * 24 * time.Hour)
+	if tasks, _ = e.svc.Experience(e.ctx, s.Ioana); len(tasks) != 0 {
+		t.Fatalf("old tasks kept: %+v", tasks)
+	}
+}
+
+func TestDuplicatePhoneLookupAndOptionalName(t *testing.T) {
+	e := setup(t)
+	e.customer(t, e.st.Ioana, "", "0722 000 901")
+	page, err := e.svc.ListCustomers(e.ctx, e.st.Andrei, crm.CustomerFilter{ExactPhone: "+40 722 000 901"})
+	must(t, err)
+	if page.Total != 1 || page.Items[0].Name != "" {
+		t.Fatal("exact phone lookup")
+	}
+	_, err = e.svc.ListCustomers(e.ctx, e.st.Andrei, crm.CustomerFilter{ExactPhone: "123"})
+	is(t, err, apperr.ErrValidation)
+	// Shared numbers remain allowed.
+	e.customer(t, e.st.Andrei, "Alt membru al familiei", "0722000901")
+	page, _ = e.svc.ListCustomers(e.ctx, e.st.Andrei, crm.CustomerFilter{ExactPhone: "0722000901", Sort: "name"})
+	// Without a name, the phone number stands in when sorting.
+	if page.Total != 2 || page.Items[0].Name != "" {
+		t.Fatalf("shared number / name sort: %+v", page.Items)
 	}
 }

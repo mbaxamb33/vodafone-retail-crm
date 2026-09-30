@@ -19,8 +19,25 @@ export default function VisitForm({
   onSaved: () => void;
 }) {
   const [selected, setSelected] = useState<number[]>([0]);
-  const [ownership, setOwnership] = useState("keep");
-  const [action, setAction] = useState("");
+  const [ownership, setOwnership] = useState<"keep" | "owned">("keep");
+  const [action, setAction] = useState("none");
+  const [actionDetails, setActionDetails] = useState("");
+  const [agreedDate, setAgreedDate] = useState(false);
+  const [resolutionType, setResolutionType] = useState<"invoice" | "other">(
+    "invoice",
+  );
+  const [holder, setHolder] = useState<"holder" | "other">("holder");
+  const [resolutionStatus, setResolutionStatus] = useState<
+    "resolved" | "unresolved" | "pending"
+  >("resolved");
+  const [remind, setRemind] = useState(false);
+  const [reminderDue, setReminderDue] = useState("");
+  const [reminderNotes, setReminderNotes] = useState("");
+  const unresolved =
+    selected.includes(1) &&
+    resolutionType === "other" &&
+    resolutionStatus !== "resolved";
+
   const [due, setDue] = useState(today());
   const [reason, setReason] = useState("support");
   const [notes, setNotes] = useState("");
@@ -35,7 +52,21 @@ export default function VisitForm({
         notes,
         ownership,
         nextAction: action,
-        due: action ? due : "",
+        actionDetails: action === "other" ? actionDetails : "",
+        agreedDate,
+        due: agreedDate ? due : "",
+        resolution: selected.includes(1)
+          ? {
+              type: resolutionType,
+              ...(resolutionType === "invoice"
+                ? { holder }
+                : { status: resolutionStatus }),
+            }
+          : null,
+        reminder:
+          unresolved && remind
+            ? { due: reminderDue, notes: reminderNotes }
+            : null,
         opportunities: product.trim()
           ? [{ product: product.trim(), category }]
           : [],
@@ -44,11 +75,13 @@ export default function VisitForm({
   });
   const fieldError = (f: string) =>
     save.error instanceof ApiError ? save.error.fields[f] : undefined;
+  const fieldErrors =
+    save.error instanceof ApiError ? Object.values(save.error.fields) : [];
   return (
     <Modal title="O conversație de ținut minte." onClose={onClose}>
       <div className="visit-customer">
-        <Avatar name={customer.name} small />
-        <strong>{customer.name}</strong>
+        <Avatar name={customer.name || customer.phone} small />
+        <strong>{customer.name || customer.phone}</strong>
         <span>{customer.phone}</span>
       </div>
       <form
@@ -121,28 +154,145 @@ export default function VisitForm({
             </button>
           ))}
         </div>
-        <div className="form-columns">
-          <div>
-            <label htmlFor="action">Următorul pas</label>
+        {selected.includes(1) && (
+          <section className="visit-detail-panel">
+            <h3>Rezolvarea solicitării</h3>
+            <label htmlFor="resolution-type">Tipul solicitării</label>
             <select
-              id="action"
-              value={action}
-              onChange={(e) => setAction(e.target.value)}
+              id="resolution-type"
+              value={resolutionType}
+              onChange={(e) =>
+                setResolutionType(e.target.value as typeof resolutionType)
+              }
             >
-              <option value="">Fără acțiune</option>
-              {catalog.data?.nextActions.map((a) => (
-                <option key={a.code} value={a.label}>
-                  {a.label}
-                </option>
-              ))}
+              <option value="invoice">Încasare factură</option>
+              <option value="other">Alte solicitări</option>
             </select>
-          </div>
-          {action && (
-            <div>
+            {resolutionType === "invoice" ? (
+              <>
+                <label htmlFor="holder">Cine a venit?</label>
+                <select
+                  id="holder"
+                  value={holder}
+                  onChange={(e) => setHolder(e.target.value as typeof holder)}
+                >
+                  <option value="holder">Titular</option>
+                  <option value="other">Netitular</option>
+                </select>
+              </>
+            ) : (
+              <>
+                <label htmlFor="resolution-status">Starea solicitării</label>
+                <select
+                  id="resolution-status"
+                  value={resolutionStatus}
+                  onChange={(e) =>
+                    setResolutionStatus(
+                      e.target.value as typeof resolutionStatus,
+                    )
+                  }
+                >
+                  <option value="resolved">Rezolvat</option>
+                  <option value="unresolved">Nerezolvat</option>
+                  <option value="pending">
+                    În așteptare · are caz deschis
+                  </option>
+                </select>
+              </>
+            )}
+            {unresolved && (
+              <>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    checked={remind}
+                    onChange={(e) => setRemind(e.target.checked)}
+                  />
+                  Amintește-mi să verific rezolvarea
+                </label>
+                <p className="form-hint">
+                  Reminder intern pentru tine. Nu presupune o dată convenită cu
+                  clientul.
+                </p>
+                {remind && (
+                  <>
+                    <label htmlFor="reminder-due">
+                      Când verifici problema?
+                    </label>
+                    <input
+                      id="reminder-due"
+                      type="date"
+                      min={today()}
+                      required
+                      value={reminderDue}
+                      onChange={(e) => setReminderDue(e.target.value)}
+                    />
+                    <label htmlFor="reminder-notes">
+                      Ce trebuie verificat?
+                    </label>
+                    <input
+                      id="reminder-notes"
+                      required
+                      maxLength={500}
+                      value={reminderNotes}
+                      onChange={(e) => setReminderNotes(e.target.value)}
+                      placeholder="Ex. S-a rezolvat cazul de facturare?"
+                    />
+                  </>
+                )}
+              </>
+            )}
+          </section>
+        )}
+        <label htmlFor="action">Următorul pas stabilit cu clientul</label>
+        <select
+          id="action"
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+        >
+          {(catalog.data?.nextActions.length
+            ? catalog.data.nextActions
+            : [{ code: "none", label: "Nimic" }]
+          ).map((a) => (
+            <option key={a.code} value={a.code}>
+              {a.label}
+            </option>
+          ))}
+        </select>
+        {action === "other" && (
+          <>
+            <label htmlFor="action-details">Ce ați stabilit?</label>
+            <input
+              id="action-details"
+              required
+              maxLength={500}
+              value={actionDetails}
+              onChange={(e) => setActionDetails(e.target.value)}
+            />
+          </>
+        )}
+        {action === "keep_in_touch" && (
+          <p className="consent-note">
+            Prin această alegere consemnezi că persoana și-a exprimat acordul să
+            rămâneți în contact.
+          </p>
+        )}
+        <section className="visit-detail-panel">
+          <label className="check-label">
+            <input
+              type="checkbox"
+              checked={agreedDate}
+              onChange={(e) => setAgreedDate(e.target.checked)}
+            />
+            Am stabilit o dată împreună cu clientul
+          </label>
+          {agreedDate ? (
+            <>
               <label htmlFor="due">Data revenirii</label>
               <input
                 id="due"
                 type="date"
+                min={today()}
                 required
                 value={due}
                 onChange={(e) => setDue(e.target.value)}
@@ -150,9 +300,14 @@ export default function VisitForm({
               {fieldError("due") && (
                 <p className="error">{fieldError("due")}</p>
               )}
-            </div>
+            </>
+          ) : (
+            <p className="form-hint">
+              Fără dată stabilită. Oportunitatea și următorul pas pot fi
+              păstrate fără programare.
+            </p>
           )}
-        </div>
+        </section>
         <label htmlFor="product">
           Oportunitate nouă <span className="optional">opțional</span>
         </label>
@@ -193,9 +348,16 @@ export default function VisitForm({
           Păstrează doar detaliile necesare. Evită datele personale sensibile.
         </p>
         {save.error && (
-          <p className="error" role="alert">
-            {save.error.message}
-          </p>
+          <div className="error" role="alert">
+            <p>{save.error.message}</p>
+            {fieldErrors.length > 0 && (
+              <ul>
+                {fieldErrors.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
         <button
           className="button primary full"

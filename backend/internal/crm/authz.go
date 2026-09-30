@@ -7,9 +7,11 @@ import "vodafone/store/internal/apperr"
 type Permission string
 
 const (
-	// PermAssignAnyone allows assigning customers and follow-ups to any store member,
-	// and reassigning customers owned by colleagues.
-	PermAssignAnyone Permission = "customers.assign_any"
+	// PermAssignAnyone allows assigning follow-ups and opportunities to any store member.
+	PermAssignAnyone Permission = "work.assign_any"
+	// PermReturnToPool allows returning a colleague's customer to the store pool. Nobody may
+	// hand a customer directly to someone else; customers are only claimed from the pool.
+	PermReturnToPool Permission = "customers.return_to_pool"
 	// PermManageAnyWork allows changing colleagues' follow-ups and opportunities.
 	PermManageAnyWork   Permission = "work.manage_any"
 	PermEditAnyNotes    Permission = "visits.edit_any_notes"
@@ -25,7 +27,7 @@ const (
 var rolePermissions = map[string]map[Permission]bool{
 	RoleEmployee: {},
 	RoleManager: {
-		PermAssignAnyone: true, PermManageAnyWork: true, PermEditAnyNotes: true, PermEditAnyCustomer: true,
+		PermAssignAnyone: true, PermReturnToPool: true, PermManageAnyWork: true, PermEditAnyNotes: true, PermEditAnyCustomer: true,
 		PermArchiveCustomer: true, PermAnonymize: true, PermViewReports: true, PermViewAudit: true, PermViewStoreWork: true,
 	},
 }

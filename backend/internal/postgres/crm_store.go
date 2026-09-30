@@ -34,7 +34,7 @@ func rangeCond(a *args, column string, r crm.TimeRange) string {
 
 func (q *queries) StoreByID(ctx context.Context, storeID string) (crm.RetailStore, error) {
 	var s crm.RetailStore
-	err := q.q.QueryRow(ctx, `SELECT id::text, name, timezone FROM stores WHERE id = $1`, storeID).Scan(&s.ID, &s.Name, &s.Timezone)
+	err := q.q.QueryRow(ctx, `SELECT id::text, name, timezone, experience_since::text FROM stores WHERE id = $1`, storeID).Scan(&s.ID, &s.Name, &s.Timezone, &s.ExperienceSince)
 	return s, mapErr(err)
 }
 
@@ -121,6 +121,9 @@ func (q *queries) Customers(ctx context.Context, storeID string, f crm.CustomerF
 		}
 		where = append(where, "("+strings.Join(conds, " OR ")+")")
 	}
+	if f.ExactPhone != "" {
+		where = append(where, "c.phone = "+a.add(f.ExactPhone))
+	}
 	if f.OwnerID != "" {
 		where = append(where, "c.owner_id = "+a.add(f.OwnerID))
 	}
@@ -135,7 +138,7 @@ func (q *queries) Customers(ctx context.Context, storeID string, f crm.CustomerF
 	order := "coalesce(c.last_interaction_at, c.created_at) DESC, c.id"
 	switch f.Sort {
 	case "name":
-		order = "c.search_name, c.id"
+		order = "coalesce(nullif(c.search_name, ''), c.phone), c.id"
 	case "newest":
 		order = "c.created_at DESC, c.id"
 	case "followup":
@@ -181,13 +184,22 @@ func (q *queries) AnonymizeCustomer(ctx context.Context, storeID, id string, at 
 
 // ---- Visits ----
 
-const visitCols = `v.id::text, v.store_id::text, v.customer_id::text, v.employee_id::text, v.occurred_at, v.reason_code, v.reason, v.steps, v.furthest_step, v.notes, v.notes_edited_at`
+const visitCols = `v.id::text, v.store_id::text, v.customer_id::text, v.employee_id::text, v.occurred_at, v.reason_code, v.reason, v.steps, v.furthest_step, v.notes, v.notes_edited_at,
+	v.next_action, v.next_action_label, v.next_action_details, v.contact_consent, coalesce(v.agreed_due::text, ''),
+	coalesce(v.resolution_type, ''), coalesce(v.resolution_holder, ''), coalesce(v.resolution_status, '')`
 
 func scanVisit(r pgx.Row) (crm.Visit, error) {
 	var v crm.Visit
 	var steps []int16
 	var furthest int16
-	err := r.Scan(&v.ID, &v.StoreID, &v.CustomerID, &v.EmployeeID, &v.At, &v.ReasonCode, &v.Reason, &steps, &furthest, &v.Notes, &v.NotesEditedAt)
+	var res crm.Resolution
+	d := &v.Details
+	err := r.Scan(&v.ID, &v.StoreID, &v.CustomerID, &v.EmployeeID, &v.At, &v.ReasonCode, &v.Reason, &steps, &furthest, &v.Notes, &v.NotesEditedAt,
+		&d.NextAction, &d.NextActionLabel, &d.ActionDetails, &d.ContactConsent, &d.Due, &res.Type, &res.Holder, &res.Status)
+	d.AgreedDate = d.Due != ""
+	if res.Type != "" {
+		d.Resolution = &res
+	}
 	v.Steps = make([]int, len(steps))
 	for i, s := range steps {
 		v.Steps[i] = int(s)
@@ -230,9 +242,16 @@ func (q *queries) Visits(ctx context.Context, storeID string, f crm.VisitFilter)
 }
 
 func (q *queries) InsertVisit(ctx context.Context, v crm.Visit) error {
-	_, err := q.q.Exec(ctx, `INSERT INTO visits (id, store_id, customer_id, employee_id, occurred_at, reason_code, reason, steps, furthest_step, notes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		v.ID, v.StoreID, v.CustomerID, v.EmployeeID, v.At, v.ReasonCode, v.Reason, v.Steps, v.FurthestStep, v.Notes)
+	d := v.Details
+	var resType, holder, status string
+	if d.Resolution != nil {
+		resType, holder, status = d.Resolution.Type, d.Resolution.Holder, d.Resolution.Status
+	}
+	_, err := q.q.Exec(ctx, `INSERT INTO visits (id, store_id, customer_id, employee_id, occurred_at, reason_code, reason, steps, furthest_step, notes,
+			next_action, next_action_label, next_action_details, contact_consent, agreed_due, resolution_type, resolution_holder, resolution_status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::date, $16, $17, $18)`,
+		v.ID, v.StoreID, v.CustomerID, v.EmployeeID, v.At, v.ReasonCode, v.Reason, v.Steps, v.FurthestStep, v.Notes,
+		d.NextAction, d.NextActionLabel, d.ActionDetails, d.ContactConsent, nullable(d.Due), nullable(resType), nullable(holder), nullable(status))
 	return mapErr(err)
 }
 
@@ -247,12 +266,12 @@ func (q *queries) UpdateVisitNotes(ctx context.Context, v crm.Visit, previous, e
 
 // ---- Opportunities ----
 
-const opportunityCols = `o.id::text, o.store_id::text, o.customer_id::text, o.employee_id::text, coalesce(o.source_visit_id::text, ''), o.product, o.category, o.stage,
+const opportunityCols = `o.id::text, o.store_id::text, o.customer_id::text, o.employee_id::text, coalesce(o.source_visit_id::text, ''), o.product, o.category, o.stage, o.next_step,
 	o.estimated_value::float8, o.notes, o.created_at, o.updated_at, o.stage_changed_at, o.closed_at`
 
 func scanOpportunity(r pgx.Row) (crm.Opportunity, error) {
 	var o crm.Opportunity
-	err := r.Scan(&o.ID, &o.StoreID, &o.CustomerID, &o.EmployeeID, &o.SourceVisitID, &o.Product, &o.Category, &o.Stage, &o.EstimatedValue, &o.Notes, &o.CreatedAt, &o.UpdatedAt, &o.StageChangedAt, &o.ClosedAt)
+	err := r.Scan(&o.ID, &o.StoreID, &o.CustomerID, &o.EmployeeID, &o.SourceVisitID, &o.Product, &o.Category, &o.Stage, &o.NextStep, &o.EstimatedValue, &o.Notes, &o.CreatedAt, &o.UpdatedAt, &o.StageChangedAt, &o.ClosedAt)
 	return o, mapErr(err)
 }
 
@@ -294,9 +313,9 @@ func (q *queries) Opportunities(ctx context.Context, storeID string, f crm.Oppor
 }
 
 func (q *queries) InsertOpportunity(ctx context.Context, o crm.Opportunity) error {
-	_, err := q.q.Exec(ctx, `INSERT INTO opportunities (id, store_id, customer_id, employee_id, source_visit_id, product, category, stage, estimated_value, notes, created_at, updated_at, stage_changed_at, closed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-		o.ID, o.StoreID, o.CustomerID, o.EmployeeID, nullable(o.SourceVisitID), o.Product, o.Category, o.Stage, o.EstimatedValue, o.Notes, o.CreatedAt, o.UpdatedAt, o.StageChangedAt, o.ClosedAt)
+	_, err := q.q.Exec(ctx, `INSERT INTO opportunities (id, store_id, customer_id, employee_id, source_visit_id, product, category, stage, estimated_value, notes, created_at, updated_at, stage_changed_at, closed_at, next_step)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		o.ID, o.StoreID, o.CustomerID, o.EmployeeID, nullable(o.SourceVisitID), o.Product, o.Category, o.Stage, o.EstimatedValue, o.Notes, o.CreatedAt, o.UpdatedAt, o.StageChangedAt, o.ClosedAt, o.NextStep)
 	return mapErr(err)
 }
 
@@ -315,12 +334,12 @@ func (q *queries) InsertStageEvent(ctx context.Context, e crm.StageEvent) error 
 
 // ---- Follow-ups ----
 
-const followUpCols = `f.id::text, f.store_id::text, f.customer_id::text, f.employee_id::text, coalesce(f.opportunity_id::text, ''), coalesce(f.source_visit_id::text, ''),
+const followUpCols = `f.id::text, f.store_id::text, f.customer_id::text, f.employee_id::text, coalesce(f.opportunity_id::text, ''), coalesce(f.source_visit_id::text, ''), f.kind,
 	f.type, f.due::text, f.status, f.notes, f.created_by::text, f.created_at, f.updated_at, f.completed_at`
 
 func scanFollowUp(r pgx.Row) (crm.FollowUp, error) {
 	var f crm.FollowUp
-	err := r.Scan(&f.ID, &f.StoreID, &f.CustomerID, &f.EmployeeID, &f.OpportunityID, &f.SourceVisitID, &f.Type, &f.Due, &f.Status, &f.Notes, &f.CreatedBy, &f.CreatedAt, &f.UpdatedAt, &f.CompletedAt)
+	err := r.Scan(&f.ID, &f.StoreID, &f.CustomerID, &f.EmployeeID, &f.OpportunityID, &f.SourceVisitID, &f.Kind, &f.Type, &f.Due, &f.Status, &f.Notes, &f.CreatedBy, &f.CreatedAt, &f.UpdatedAt, &f.CompletedAt)
 	return f, mapErr(err)
 }
 
@@ -376,9 +395,9 @@ func (q *queries) FollowUps(ctx context.Context, storeID string, f crm.FollowUpF
 }
 
 func (q *queries) InsertFollowUp(ctx context.Context, f crm.FollowUp) error {
-	_, err := q.q.Exec(ctx, `INSERT INTO follow_ups (id, store_id, customer_id, employee_id, opportunity_id, source_visit_id, type, due, status, notes, created_by, created_at, updated_at, completed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12, $13, $14)`,
-		f.ID, f.StoreID, f.CustomerID, f.EmployeeID, nullable(f.OpportunityID), nullable(f.SourceVisitID), f.Type, f.Due, f.Status, f.Notes, f.CreatedBy, f.CreatedAt, f.UpdatedAt, f.CompletedAt)
+	_, err := q.q.Exec(ctx, `INSERT INTO follow_ups (id, store_id, customer_id, employee_id, opportunity_id, source_visit_id, type, due, status, notes, created_by, created_at, updated_at, completed_at, kind)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12, $13, $14, $15)`,
+		f.ID, f.StoreID, f.CustomerID, f.EmployeeID, nullable(f.OpportunityID), nullable(f.SourceVisitID), f.Type, f.Due, f.Status, f.Notes, f.CreatedBy, f.CreatedAt, f.UpdatedAt, f.CompletedAt, f.Kind)
 	return mapErr(err)
 }
 
@@ -466,6 +485,47 @@ func (q *queries) MarkNotificationsRead(ctx context.Context, storeID, userID str
 		sql += " AND id = ANY(" + a.add(ids) + "::uuid[])"
 	}
 	_, err := q.q.Exec(ctx, sql, a...)
+	return mapErr(err)
+}
+
+func (q *queries) NotifiedSince(ctx context.Context, storeID, userID, kind string, since time.Time) (bool, error) {
+	var exists bool
+	err := q.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM notifications WHERE store_id = $1 AND user_id = $2 AND kind = $3 AND created_at >= $4)`, storeID, userID, kind, since).Scan(&exists)
+	return exists, mapErr(err)
+}
+
+// ---- Experience follow-ups ----
+
+func (q *queries) ExperienceTasks(ctx context.Context, storeID, employeeID, timezone, from, to string) ([]crm.ExperienceTask, error) {
+	rows, err := q.q.Query(ctx, `
+		SELECT d.customer_id::text, d.day::text, coalesce(x.status, 'open')
+		FROM (
+			SELECT DISTINCT customer_id, (occurred_at AT TIME ZONE $3)::date AS day
+			FROM visits WHERE store_id = $1 AND employee_id = $2
+		) d
+		JOIN customers c ON c.id = d.customer_id AND c.status <> 'anonymized'
+		LEFT JOIN experience_checks x ON x.employee_id = $2 AND x.customer_id = d.customer_id AND x.day = d.day
+		WHERE d.day >= $4::date AND d.day < $5::date
+		ORDER BY d.day, c.created_at, d.customer_id`, storeID, employeeID, timezone, from, to)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	items, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (crm.ExperienceTask, error) {
+		t := crm.ExperienceTask{EmployeeID: employeeID}
+		err := r.Scan(&t.CustomerID, &t.Day, &t.Status)
+		t.ID = t.CustomerID + ":" + t.Day
+		return t, err
+	})
+	if items == nil {
+		items = []crm.ExperienceTask{}
+	}
+	return items, mapErr(err)
+}
+
+func (q *queries) SetExperienceStatus(ctx context.Context, storeID string, t crm.ExperienceTask, at time.Time) error {
+	_, err := q.q.Exec(ctx, `INSERT INTO experience_checks (store_id, employee_id, customer_id, day, status, updated_at) VALUES ($1, $2, $3, $4::date, $5, $6)
+		ON CONFLICT (employee_id, customer_id, day) DO UPDATE SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at`,
+		storeID, t.EmployeeID, t.CustomerID, t.Day, t.Status, at)
 	return mapErr(err)
 }
 

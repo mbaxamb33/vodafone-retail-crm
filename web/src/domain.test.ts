@@ -1,4 +1,9 @@
-import { nextOpportunityAction, staleOpportunity, dateOffset } from "./domain";
+import {
+  nextOpportunityAction,
+  staleOpportunity,
+  dateOffset,
+  missingNextStep,
+} from "./domain";
 import { describe, it, expect } from "vitest";
 import {
   normalizePhone,
@@ -44,6 +49,7 @@ describe("opportunity next actions", () => {
       employeeId: "e",
       product: "Internet",
       stage: "offer",
+      nextStep: "",
       createdAt: "2026-09-01T00:00:00Z",
     };
     const f = {
@@ -53,6 +59,7 @@ describe("opportunity next actions", () => {
       type: "Call",
       due: "2026-10-01",
       status: "open" as const,
+      kind: "agreed" as const,
     };
     expect(nextOpportunityAction(o, [f])).toBeUndefined();
     expect(nextOpportunityAction(o, [{ ...f, opportunityId: "o" }])?.id).toBe(
@@ -70,6 +77,7 @@ describe("opportunity next actions", () => {
       employeeId: "e",
       product: "Internet",
       stage: "offer",
+      nextStep: "",
       createdAt: "2026-09-01T00:00:00Z",
     };
     expect(staleOpportunity(o, now)).toBe(true);
@@ -81,5 +89,18 @@ describe("opportunity next actions", () => {
   it("calculates calendar date ranges across month and year boundaries", () => {
     expect(dateOffset(-6, "2026-10-02")).toBe("2026-09-26");
     expect(dateOffset(-1, "2026-01-01")).toBe("2025-12-31");
+  });
+  it("treats a step agreed without a date as a next step", () => {
+    const o = {
+      id: "o",
+      customerId: "c",
+      employeeId: "e",
+      product: "Internet",
+      stage: "offer",
+      nextStep: "",
+      createdAt: "2026-09-01T00:00:00Z",
+    };
+    expect(missingNextStep(o, [])).toBe(true);
+    expect(missingNextStep({ ...o, nextStep: "thinking" }, [])).toBe(false);
   });
 });

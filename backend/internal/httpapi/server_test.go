@@ -123,7 +123,7 @@ func TestAuthBoundaries(t *testing.T) {
 	if code, body := emp.do("POST", "customers", map[string]any{"name": "X", "phone": "1", "extra": true}, nil); code != 422 || errorCode(body) != "VALIDATION_FAILED" {
 		t.Fatal("unknown fields must be rejected", code)
 	}
-	code, body := emp.do("POST", "customers", map[string]any{"name": "X", "phone": "1"}, nil)
+	code, body := emp.do("POST", "customers", map[string]any{"name": strings.Repeat("x", 121), "phone": "1"}, nil)
 	fields, _ := body["error"].(map[string]any)["fields"].(map[string]any)
 	if code != 422 || fields["name"] == nil || fields["phone"] == nil {
 		t.Fatal("field-level errors", body)
@@ -165,16 +165,19 @@ func TestEmployeeWorkflow(t *testing.T) {
 	if code, body := emp.do("POST", "customers", map[string]any{"name": "Client Nou", "phone": "0722 345 678"}, &c); code != 201 {
 		t.Fatal(code, body)
 	}
+	// The server compares dates with the store's calendar, so use one safely in the future.
+	due := time.Now().AddDate(0, 0, 3).Format(time.DateOnly)
 	var visit crm.VisitResult
 	code, body := emp.do("POST", "customers/"+c.ID+"/visits", map[string]any{
 		"reasonCode": "renewal", "steps": []int{0, 1, 3}, "notes": "Revine joi.", "ownership": "owned",
-		"nextAction": "Sună clientul", "due": "2026-10-01", "opportunities": []map[string]any{{"product": "Red Unlimited", "category": "mobile"}},
+		"resolution": map[string]any{"type": "invoice", "holder": "holder"},
+		"nextAction": "thinking", "agreedDate": true, "due": due, "opportunities": []map[string]any{{"product": "Red Unlimited", "category": "mobile"}},
 	}, &visit)
 	if code != 201 || visit.FollowUp == nil || visit.Customer.OwnerID != st.Ioana.ID {
 		t.Fatal("visit", code, body)
 	}
 	emp.do("GET", "customers?owner=me", nil, &found)
-	if found.Total != 1 || found.Items[0].ID != c.ID || found.Items[0].NextFollowUpDue != "2026-10-01" {
+	if found.Total != 1 || found.Items[0].ID != c.ID || found.Items[0].NextFollowUpDue != due {
 		t.Fatalf("portfolio: %+v", found)
 	}
 	var fu crm.Page[crm.FollowUp]
@@ -234,8 +237,19 @@ func TestManagerWorkflow(t *testing.T) {
 		t.Fatal("manager should see audit history")
 	}
 	var moved crm.Customer
-	if code, _ := mgr.do("POST", "customers/"+c.ID+"/ownership", map[string]any{"ownership": "owned", "ownerId": st.Andrei.ID}, &moved); code != 200 || moved.OwnerID != st.Andrei.ID {
-		t.Fatal("reassign")
+	if code, body := mgr.do("POST", "customers/"+c.ID+"/ownership", map[string]any{"ownership": "owned", "ownerId": st.Andrei.ID}, nil); code != 403 {
+		t.Fatal("managers must not hand customers to someone", code, body)
+	}
+	if code, _ := mgr.do("POST", "customers/"+c.ID+"/ownership", map[string]any{"ownership": "pool"}, &moved); code != 200 || moved.Ownership != "pool" {
+		t.Fatal("manager returns a customer to the pool")
+	}
+	andrei := newClient(t, srv.URL)
+	andrei.login(st.Andrei.Email)
+	if code, _ := andrei.do("POST", "customers/"+c.ID+"/ownership", map[string]any{"ownership": "owned"}, &moved); code != 200 || moved.OwnerID != st.Andrei.ID {
+		t.Fatal("claim from pool")
+	}
+	if code, body := emp.do("POST", "customers/"+c.ID+"/ownership", map[string]any{"ownership": "owned"}, nil); code != 409 || errorCode(body) != "CUSTOMER_ALREADY_OWNED" {
+		t.Fatal("claiming a colleague's customer", code, body)
 	}
 	var notes crm.NotificationList
 	emp.do("GET", "notifications", nil, &notes)
@@ -246,7 +260,7 @@ func TestManagerWorkflow(t *testing.T) {
 		t.Fatal("mark read")
 	}
 	emp.do("GET", "customers/"+c.ID, nil, &profile)
-	if len(profile.Audit) != 0 || len(profile.OwnershipHistory) != 2 {
+	if len(profile.Audit) != 0 || len(profile.OwnershipHistory) != 3 {
 		t.Fatal("employees see ownership history but not the audit log")
 	}
 }
@@ -298,5 +312,24 @@ func TestStaticFrontendAndProxiedClientIP(t *testing.T) {
 	must(db.Pool.QueryRow(context.Background(), `SELECT client_ip FROM login_attempts ORDER BY id DESC LIMIT 1`).Scan(&ip))
 	if ip != "203.0.113.9" {
 		t.Fatalf("recorded ip %q", ip)
+	}
+}
+
+func TestExperienceEndpoints(t *testing.T) {
+	srv, st, _ := setup(t)
+	emp := newClient(t, srv.URL)
+	emp.login(st.Ioana.Email)
+	var list struct {
+		Items []crm.ExperienceTask `json:"items"`
+	}
+	if code, _ := emp.do("GET", "experience", nil, &list); code != 200 || len(list.Items) != 0 {
+		t.Fatal("empty experience list", code)
+	}
+	if code, body := emp.do("PATCH", "experience/"+crm.NewID()+":2026-09-01", map[string]string{"status": "done"}, nil); code != 404 {
+		t.Fatal("unknown task", code, body)
+	}
+	var page crm.Page[crm.Customer]
+	if code, body := emp.do("GET", "customers?phone=0722%20000%20000", nil, &page); code != 200 || page.Total != 0 {
+		t.Fatal("exact phone lookup", code, body)
 	}
 }

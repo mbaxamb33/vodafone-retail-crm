@@ -33,10 +33,20 @@ export default function MobileNavigation({
   onLogout: () => void;
 }) {
   const { pathname } = useLocation();
-  const moreActive = ["/portfolio", "/pipeline", "/manager", "/team"].some(
-    (path) => pathname.startsWith(path),
-  );
+  const moreActive = [
+    "/portfolio",
+    "/store-pool",
+    "/pipeline",
+    "/manager",
+    "/team",
+  ].some((path) => pathname.startsWith(path));
   const links: [string, string, string, LucideIcon][] = [
+    [
+      "/store-pool",
+      "Clienții magazinului",
+      "Relații disponibile pentru preluare",
+      Store,
+    ],
     [
       "/portfolio",
       "Portofoliul meu",

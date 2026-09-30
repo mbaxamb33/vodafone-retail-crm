@@ -8,12 +8,14 @@ export default function CustomerList({
   data,
   user,
   portfolio,
+  pool = false,
   onOpen,
   onCreate,
 }: {
   data: Workspace;
   user: User;
   portfolio: boolean;
+  pool?: boolean;
   onOpen: (id: string) => void;
   onCreate: () => void;
 }) {
@@ -24,7 +26,7 @@ export default function CustomerList({
   const list = useCustomerPages({
     q: query,
     owner: portfolio ? "me" : "",
-    ownership: portfolio ? "" : filter,
+    ownership: pool ? "pool" : portfolio ? "" : filter,
     sort,
   });
   const items = list.data?.pages.flatMap((p) => p.items) ?? [];
@@ -37,10 +39,18 @@ export default function CustomerList({
       <div className="page-heading">
         <div>
           <span className="eyebrow">OAMENI, NU DOAR NUMERE</span>
-          <h1>{portfolio ? "Portofoliul meu" : "Clienții magazinului"}</h1>
+          <h1>
+            {portfolio
+              ? "Portofoliul meu"
+              : pool
+                ? "Clienții magazinului"
+                : "Toți clienții"}
+          </h1>
           <p>
             {list.isPending ? "Se încarcă…" : `${total} relații.`} Fiecare cu
-            propria poveste.
+            propria poveste.{" "}
+            {pool &&
+              "Clienți disponibili pentru preluare. Deschide profilul și alege «Îl iau eu»."}
           </p>
         </div>
         <button className="button primary" onClick={onCreate}>
@@ -66,7 +76,7 @@ export default function CustomerList({
             Filtre și sortare{filter && <span className="filter-active-dot" />}
           </summary>
           <div className="filter-options-body">
-            {!portfolio && (
+            {!portfolio && !pool && (
               <select
                 aria-label="Responsabilitate"
                 value={filter}
@@ -126,10 +136,10 @@ export default function CustomerList({
               key={c.id}
             >
               <div className="customer-card-top">
-                <Avatar name={c.name} />
+                <Avatar name={c.name || c.phone} />
                 <ArrowUpRight size={20} />
               </div>
-              <h3>{c.name}</h3>
+              <h3>{c.name || c.phone}</h3>
               <p>{c.phone}</p>
               <div className="tags">
                 {c.status === "archived" && (

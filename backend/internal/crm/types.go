@@ -24,6 +24,18 @@ const (
 	FollowUpUnreachable = "unreachable"
 	FollowUpDone        = "done"
 
+	FollowUpAgreed   = "agreed"   // a date agreed with the customer
+	FollowUpReminder = "reminder" // an internal check the employee set for themselves
+	FollowUpTask     = "task"     // scheduled directly
+
+	NextActionNone        = "none"
+	NextActionOther       = "other"
+	NextActionKeepInTouch = "keep_in_touch"
+
+	ExperienceOpen        = "open"
+	ExperienceUnreachable = "unreachable"
+	ExperienceDone        = "done"
+
 	StageIdentified   = "identified"
 	StageQualified    = "qualified"
 	StageVerification = "verification"
@@ -39,7 +51,10 @@ const (
 var Stages = []string{StageIdentified, StageQualified, StageVerification, StagePresentation, StageOffer, StageWaiting, StageWon, StageLost, StagePaused}
 
 // JourneySteps is the eight-step store conversation. Visits record step indices into this list.
-var JourneySteps = []string{"Welcome", "Rezolvarea solicitării", "Small talk", "Atenție și permisiune", "Verificare", "Prezentare", "Ofertă", "Contractare"}
+var JourneySteps = []string{"Welcome", "Rezolvarea solicitării", "Small talk", "Atragerea intenției comerciale", "Verificare", "Prezentare", "Ofertă", "Contractare"}
+
+// ResolutionStep is the journey step whose selection requires a request resolution.
+const ResolutionStep = 1
 
 // CommercialStep is the first journey step that counts as a commercial conversation.
 const CommercialStep = 3
@@ -57,6 +72,8 @@ type RetailStore struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Timezone string `json:"timezone"`
+	// ExperienceSince is the first visit day that produces experience follow-ups.
+	ExperienceSince string `json:"-"`
 }
 
 type Customer struct {
@@ -77,17 +94,37 @@ type Customer struct {
 }
 
 type Visit struct {
-	ID            string     `json:"id"`
-	StoreID       string     `json:"-"`
-	CustomerID    string     `json:"customerId"`
-	EmployeeID    string     `json:"employeeId"`
-	At            time.Time  `json:"at"`
-	ReasonCode    string     `json:"reasonCode"`
-	Reason        string     `json:"reason"`
-	Steps         []int      `json:"steps"`
-	FurthestStep  int        `json:"furthestStep"`
-	Notes         string     `json:"notes"`
-	NotesEditedAt *time.Time `json:"notesEditedAt,omitempty"`
+	ID            string       `json:"id"`
+	StoreID       string       `json:"-"`
+	CustomerID    string       `json:"customerId"`
+	EmployeeID    string       `json:"employeeId"`
+	At            time.Time    `json:"at"`
+	ReasonCode    string       `json:"reasonCode"`
+	Reason        string       `json:"reason"`
+	Steps         []int        `json:"steps"`
+	FurthestStep  int          `json:"furthestStep"`
+	Notes         string       `json:"notes"`
+	NotesEditedAt *time.Time   `json:"notesEditedAt,omitempty"`
+	Details       VisitDetails `json:"details"`
+}
+
+// VisitDetails records how the visit ended. NextActionLabel is a snapshot of the catalog label.
+type VisitDetails struct {
+	NextAction      string      `json:"nextAction"`
+	NextActionLabel string      `json:"nextActionLabel"`
+	ActionDetails   string      `json:"actionDetails"`
+	ContactConsent  bool        `json:"contactConsent"`
+	AgreedDate      bool        `json:"agreedDate"`
+	Due             string      `json:"due"`
+	Resolution      *Resolution `json:"resolution"`
+}
+
+// Resolution describes the customer's request: an invoice payment (holder or someone else)
+// or another request with its status.
+type Resolution struct {
+	Type   string `json:"type"`
+	Holder string `json:"holder,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 type FollowUp struct {
@@ -97,6 +134,7 @@ type FollowUp struct {
 	EmployeeID    string     `json:"employeeId"`
 	OpportunityID string     `json:"opportunityId,omitempty"`
 	SourceVisitID string     `json:"sourceVisitId,omitempty"`
+	Kind          string     `json:"kind"`
 	Type          string     `json:"type"`
 	Due           string     `json:"due"`
 	Status        string     `json:"status"`
@@ -116,6 +154,7 @@ type Opportunity struct {
 	Product        string     `json:"product"`
 	Category       string     `json:"category"`
 	Stage          string     `json:"stage"`
+	NextStep       string     `json:"nextStep"`
 	EstimatedValue *float64   `json:"estimatedValue"`
 	Notes          string     `json:"notes"`
 	CreatedAt      time.Time  `json:"createdAt"`
@@ -174,4 +213,14 @@ type Page[T any] struct {
 	Total  int `json:"total"`
 	Offset int `json:"offset"`
 	Limit  int `json:"limit"`
+}
+
+// ExperienceTask asks an employee to check how a customer they served found the visit.
+// It exists once per employee, customer and store-local visit day.
+type ExperienceTask struct {
+	ID         string `json:"id"`
+	CustomerID string `json:"customerId"`
+	EmployeeID string `json:"employeeId"`
+	Day        string `json:"day"`
+	Status     string `json:"status"`
 }

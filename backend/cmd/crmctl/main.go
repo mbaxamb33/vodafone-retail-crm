@@ -31,7 +31,7 @@ commands:
   list-stores                                     list stores
   create-user -store ID -email E -name N -role R  create an account (role: employee or manager)
   reset-password -email E                         set a new password and revoke sessions
-  deactivate-user -email E                        disable an account and revoke sessions
+  deactivate-user -email E                        disable an account, revoke sessions, return its customers to the pool
   seed-demo                                       create the fictional demo store (DEMO_PASSWORD or generated)
 
 DATABASE_URL must be set.`
@@ -138,10 +138,19 @@ func run(cmd string, args []string) error {
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
-		if err := db.SetUserActive(ctx, auth.NormalizeEmail(*email), false); err != nil {
+		u, _, err := db.UserByEmail(ctx, auth.NormalizeEmail(*email))
+		if err != nil {
 			return err
 		}
-		fmt.Println("account disabled; sessions revoked")
+		// Customers never stay locked to someone who has left: they return to the store pool.
+		released, err := crm.NewService(db).ReleasePortfolio(ctx, u)
+		if err != nil {
+			return err
+		}
+		if err := db.SetUserActive(ctx, u.Email, false); err != nil {
+			return err
+		}
+		fmt.Printf("account disabled; sessions revoked; %d customers returned to the store pool\n", released)
 		return nil
 	case "seed-demo":
 		password := os.Getenv("DEMO_PASSWORD")

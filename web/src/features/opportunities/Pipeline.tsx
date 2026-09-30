@@ -1,3 +1,4 @@
+import { customerLabel } from "../../domain";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
@@ -8,6 +9,7 @@ import {
   date,
   activeOpportunity,
   nextOpportunityAction,
+  missingNextStep,
   staleOpportunity,
   type Workspace,
   type User,
@@ -15,6 +17,7 @@ import {
   type FollowUp,
 } from "../../domain";
 import FollowUpForm from "../followups/FollowUpForm";
+import { useNextStepLabel } from "../../hooks";
 export default function Pipeline({
   data,
   user,
@@ -27,6 +30,7 @@ export default function Pipeline({
   refresh: (s: string) => void;
 }) {
   const [params, setParams] = useSearchParams();
+  const stepLabel = useNextStepLabel();
   const owner =
     user.role === "manager" && params.get("scope") === "all" ? "all" : "me";
   const stage = params.get("stage") ?? "";
@@ -46,7 +50,7 @@ export default function Pipeline({
       (attention === "all" ||
         (activeOpportunity(o) &&
           (attention === "missing"
-            ? !nextOpportunityAction(o, data.followUps)
+            ? missingNextStep(o, data.followUps)
             : staleOpportunity(o)))),
   );
   return (
@@ -154,7 +158,7 @@ export default function Pipeline({
                     <article className="opportunity-card" key={o.id}>
                       <span className="tag">{o.product}</span>
                       <button onClick={() => onOpen(c.id)}>
-                        <h3>{c.name}</h3>
+                        <h3>{c.name || c.phone}</h3>
                         <ArrowUpRight size={16} />
                       </button>
                       <p className="opportunity-owner">
@@ -186,7 +190,8 @@ export default function Pipeline({
                                 next.employeeId === user.id) && (
                                 <button
                                   aria-label={
-                                    "Actualizează pasul pentru " + c.name
+                                    "Actualizează pasul pentru " +
+                                    customerLabel(c)
                                   }
                                   onClick={() =>
                                     setAction({
@@ -205,14 +210,16 @@ export default function Pipeline({
                               onClick={() => setAction({ opportunity: o })}
                             >
                               <Plus size={15} />
-                              Stabilește pasul următor
+                              {o.nextStep
+                                ? `${stepLabel(o.nextStep)} · fără dată`
+                                : "Stabilește pasul următor"}
                             </button>
                           )}
                         </>
                       )}
                       <select
                         aria-label={
-                          "Etapă pentru " + c.name + " — " + o.product
+                          "Etapă pentru " + customerLabel(c) + " — " + o.product
                         }
                         value={o.stage}
                         disabled={update.isPending || !activeOpportunity(o)}
@@ -253,10 +260,11 @@ export default function Pipeline({
       {action && (
         <FollowUpForm
           customerId={action.opportunity.customerId}
-          customerName={
-            data.customers.find((c) => c.id === action.opportunity.customerId)
-              ?.name ?? ""
-          }
+          customerName={customerLabel(
+            data.customers.find(
+              (c) => c.id === action.opportunity.customerId,
+            ) ?? { name: "", phone: "Client" },
+          )}
           opportunityId={action.opportunity.id}
           followUp={action.followUp}
           user={user}

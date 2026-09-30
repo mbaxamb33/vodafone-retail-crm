@@ -1,3 +1,4 @@
+import { customerLabel } from "../../domain";
 import { useState } from "react";
 import { Check, CalendarClock } from "lucide-react";
 import { Avatar, Empty } from "../../components/ui";
@@ -74,10 +75,11 @@ export default function FollowUps({
           const c = data.customers.find((c) => c.id === f.customerId)!;
           return (
             <div className="task-row followup-row" key={f.id}>
-              <Avatar name={c.name} />
+              <Avatar name={c.name || c.phone} />
               <button className="task-main" onClick={() => onOpen(c.id)}>
-                <strong>{c.name}</strong>
+                <strong>{c.name || c.phone}</strong>
                 <span>{f.type}</span>
+                {f.notes && <small>{f.notes}</small>}
                 <span className="followup-status">
                   {followUpStatuses[f.status]}
                   {f.opportunityId
@@ -101,7 +103,9 @@ export default function FollowUps({
                 <div className="action-row">
                   <button
                     className="button"
-                    aria-label={"Actualizează follow-up pentru " + c.name}
+                    aria-label={
+                      "Actualizează follow-up pentru " + customerLabel(c)
+                    }
                     onClick={() => setSelected(f)}
                   >
                     <CalendarClock size={16} />
@@ -127,9 +131,12 @@ export default function FollowUps({
       {selected && (
         <FollowUpForm
           customerId={selected.customerId}
-          customerName={
-            data.customers.find((c) => c.id === selected.customerId)?.name ?? ""
-          }
+          customerName={customerLabel(
+            data.customers.find((c) => c.id === selected.customerId) ?? {
+              name: "",
+              phone: "Client",
+            },
+          )}
           user={user}
           users={data.users}
           followUp={selected}

@@ -30,6 +30,23 @@ export const visitSchema = z.object({
   furthestStep: z.number().optional(),
   notes: z.string(),
   notesEditedAt: z.string().optional(),
+  details: z
+    .object({
+      nextAction: z.string(),
+      nextActionLabel: z.string(),
+      actionDetails: z.string(),
+      contactConsent: z.boolean(),
+      agreedDate: z.boolean(),
+      due: z.string(),
+      resolution: z
+        .object({
+          type: z.enum(["invoice", "other"]),
+          holder: z.enum(["holder", "other"]).optional(),
+          status: z.enum(["resolved", "unresolved", "pending"]).optional(),
+        })
+        .nullable(),
+    })
+    .optional(),
 });
 export const followUpSchema = z.object({
   id: z.string(),
@@ -39,6 +56,8 @@ export const followUpSchema = z.object({
   due: z.string(),
   status: z.enum(["open", "waiting", "unreachable", "done"]),
   opportunityId: z.string().optional(),
+  sourceVisitId: z.string().optional(),
+  kind: z.enum(["agreed", "reminder", "task"]).default("task"),
   notes: z.string().optional(),
   completedAt: z.string().optional(),
 });
@@ -49,6 +68,7 @@ export const opportunitySchema = z.object({
   product: z.string(),
   category: z.string().optional(),
   stage: z.string(),
+  nextStep: z.string().default(""),
   estimatedValue: z.number().nullish(),
   notes: z.string().optional(),
   createdAt: z.string(),
@@ -178,6 +198,11 @@ export function nextOpportunityAction(o: Opportunity, followUps: FollowUp[]) {
     .filter((f) => f.opportunityId === o.id && f.status !== "done")
     .sort((a, b) => a.due.localeCompare(b.due))[0];
 }
+// An opportunity has a next step when a follow-up is linked to it or a step was agreed with
+// the customer, even without a date.
+export function missingNextStep(o: Opportunity, followUps: FollowUp[]) {
+  return !nextOpportunityAction(o, followUps) && !o.nextStep;
+}
 export function staleOpportunity(o: Opportunity, now = Date.now()) {
   const at = o.stageChangedAt ?? o.createdAt;
   return activeOpportunity(o) && now - Date.parse(at) >= 7 * 86400000;
@@ -196,7 +221,7 @@ export const steps = [
   "Welcome",
   "Rezolvarea solicitării",
   "Small talk",
-  "Atenție și permisiune",
+  "Atragerea intenției comerciale",
   "Verificare",
   "Prezentare",
   "Ofertă",
@@ -241,3 +266,6 @@ export const initials = (s: string) =>
     .map((x) => x[0])
     .slice(0, 2)
     .join("");
+
+export const customerLabel = (c: Pick<Customer, "name" | "phone">) =>
+  c.name.trim() || c.phone;

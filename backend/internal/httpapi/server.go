@@ -82,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 	api("GET /manager/dashboard", s.managerDashboard)
 	api("GET /manager/employees/{id}/activity", s.employeeActivity)
 
+	api("GET /experience", s.experience)
+	api("PATCH /experience/{id}", s.updateExperience)
+
 	api("GET /notifications", s.notifications)
 	api("POST /notifications/read", s.readNotifications)
 
@@ -225,7 +228,7 @@ func (s *Server) employeeDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listCustomers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	page, err := s.crm.ListCustomers(r.Context(), currentUser(r), crm.CustomerFilter{Query: q.Get("q"), OwnerID: q.Get("owner"), Ownership: q.Get("ownership"),
+	page, err := s.crm.ListCustomers(r.Context(), currentUser(r), crm.CustomerFilter{Query: q.Get("q"), ExactPhone: q.Get("phone"), OwnerID: q.Get("owner"), Ownership: q.Get("ownership"),
 		Status: q.Get("status"), Sort: q.Get("sort"), Offset: queryInt(r, "offset"), Limit: queryInt(r, "limit")})
 	respond(w, r, 200, page, err)
 }
@@ -369,6 +372,22 @@ func (s *Server) employeeActivity(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	a, err := s.crm.EmployeeActivity(r.Context(), currentUser(r), r.PathValue("id"), q.Get("from"), q.Get("to"), queryInt(r, "offset"), queryInt(r, "limit"))
 	respond(w, r, 200, a, err)
+}
+
+func (s *Server) experience(w http.ResponseWriter, r *http.Request) {
+	items, err := s.crm.Experience(r.Context(), currentUser(r))
+	respond(w, r, 200, map[string]any{"items": items}, err)
+}
+
+func (s *Server) updateExperience(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Status string `json:"status"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	t, err := s.crm.UpdateExperience(r.Context(), currentUser(r), r.PathValue("id"), in.Status)
+	respond(w, r, 200, t, err)
 }
 
 func (s *Server) notifications(w http.ResponseWriter, r *http.Request) {

@@ -382,6 +382,9 @@ type NotificationList struct {
 }
 
 func (s *Service) Notifications(ctx context.Context, actor User, unreadOnly bool) (NotificationList, error) {
+	if err := s.ensureExperienceNotice(ctx, actor); err != nil {
+		return NotificationList{}, err
+	}
 	items, _, err := s.store.Notifications(ctx, actor.StoreID, actor.ID, unreadOnly, 50)
 	if err != nil {
 		return NotificationList{}, err

@@ -16,8 +16,8 @@ type OpportunityInput struct {
 	Notes string `json:"notes"`
 }
 
-func (s *Service) insertOpportunity(ctx context.Context, tx Tx, actor User, customerID, employeeID string, d OpportunityDraft, notes, visitID string, now time.Time) (Opportunity, error) {
-	o := Opportunity{ID: NewID(), StoreID: actor.StoreID, CustomerID: customerID, EmployeeID: employeeID, SourceVisitID: visitID, Product: d.Product, Category: d.Category, Stage: StageIdentified, EstimatedValue: d.EstimatedValue, Notes: notes, CreatedAt: now, UpdatedAt: now, StageChangedAt: now}
+func (s *Service) insertOpportunity(ctx context.Context, tx Tx, actor User, customerID, employeeID string, d OpportunityDraft, notes, nextStep, visitID string, now time.Time) (Opportunity, error) {
+	o := Opportunity{ID: NewID(), StoreID: actor.StoreID, CustomerID: customerID, EmployeeID: employeeID, SourceVisitID: visitID, Product: d.Product, Category: d.Category, Stage: StageIdentified, NextStep: nextStep, EstimatedValue: d.EstimatedValue, Notes: notes, CreatedAt: now, UpdatedAt: now, StageChangedAt: now}
 	if err := tx.InsertOpportunity(ctx, o); err != nil {
 		return o, err
 	}
@@ -64,7 +64,7 @@ func (s *Service) CreateOpportunity(ctx context.Context, actor User, in Opportun
 		if in.EmployeeID != actor.ID && !actor.Can(PermAssignAnyone) {
 			return apperr.ErrForbidden
 		}
-		out, err = s.insertOpportunity(ctx, tx, actor, c.ID, in.EmployeeID, in.OpportunityDraft, in.Notes, "", s.clock())
+		out, err = s.insertOpportunity(ctx, tx, actor, c.ID, in.EmployeeID, in.OpportunityDraft, in.Notes, "", "", s.clock())
 		return err
 	})
 	return out, err
@@ -273,7 +273,7 @@ func (s *Service) ScheduleFollowUp(ctx context.Context, actor User, in FollowUpI
 		return FollowUp{}, apperr.ErrOpportunityNotFound
 	}
 	now := s.clock()
-	f := FollowUp{ID: NewID(), StoreID: actor.StoreID, CustomerID: in.CustomerID, EmployeeID: in.EmployeeID, OpportunityID: in.OpportunityID, Type: in.Type, Due: in.Due, Status: FollowUpOpen, Notes: in.Notes, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
+	f := FollowUp{ID: NewID(), StoreID: actor.StoreID, CustomerID: in.CustomerID, EmployeeID: in.EmployeeID, OpportunityID: in.OpportunityID, Kind: FollowUpTask, Type: in.Type, Due: in.Due, Status: FollowUpOpen, Notes: in.Notes, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
 	err := s.store.InTx(ctx, func(tx Tx) error {
 		c, err := tx.LockCustomer(ctx, actor.StoreID, in.CustomerID)
 		if err != nil {

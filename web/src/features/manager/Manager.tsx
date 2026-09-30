@@ -13,7 +13,7 @@ import {
   date,
   stages,
   activeOpportunity,
-  nextOpportunityAction,
+  missingNextStep,
   staleOpportunity,
   type Workspace,
 } from "../../domain";
@@ -32,7 +32,7 @@ export default function Manager({
     .filter((f) => f.status !== "done" && f.due < today())
     .sort((a, b) => a.due.localeCompare(b.due));
   const stale = open.filter((o) => staleOpportunity(o));
-  const missing = open.filter((o) => !nextOpportunityAction(o, data.followUps));
+  const missing = open.filter((o) => missingNextStep(o, data.followUps));
   const pool = data.customers.filter((c) => c.ownership === "pool");
   const queues = [
     ["overdue", "Reveniri restante", overdue.length],
@@ -138,9 +138,9 @@ export default function Manager({
           const customer = data.customers.find((c) => c.id === row.customerId)!;
           return (
             <div className="attention-row" key={row.id}>
-              <Avatar name={customer.name} />
+              <Avatar name={customer.name || customer.phone} />
               <button className="task-main" onClick={() => onOpen(customer.id)}>
-                <strong>{customer.name}</strong>
+                <strong>{customer.name || customer.phone}</strong>
                 <span>{row.title}</span>
                 <span>{row.detail}</span>
               </button>

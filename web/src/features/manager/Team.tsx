@@ -1,3 +1,4 @@
+import { customerLabel } from "../../domain";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ArrowRight, BriefcaseBusiness, CalendarDays } from "lucide-react";
@@ -16,7 +17,7 @@ import {
 import OwnershipEditor from "../customers/OwnershipEditor";
 import FollowUpForm from "../followups/FollowUpForm";
 import { useEmployeeActivity, useStoreReport } from "./reporting";
-import { useCustomerPages } from "../../hooks";
+import { useCustomerPages, useNextStepLabel } from "../../hooks";
 export default function Team({
   data,
   user,
@@ -33,6 +34,7 @@ export default function Team({
   const [task, setTask] = useState<FollowUp | null>(null);
   const [tab, setTab] = useState("portfolio");
   const { query: q, controls, valid, start, end } = useStoreReport();
+  const stepLabel = useNextStepLabel();
   const members = data.users;
   const id = params.get("employee") ?? members[0]?.id;
   const employee = members.find((u) => u.id === id);
@@ -161,24 +163,26 @@ export default function Team({
                 <section className="card">
                   {customers.map((c) => (
                     <div key={c.id} className="team-customer-row">
-                      <Avatar name={c.name} small />
+                      <Avatar name={c.name || c.phone} small />
                       <button
                         className="task-main"
                         onClick={() => onOpen(c.id)}
                       >
-                        <strong>{c.name}</strong>
+                        <strong>{c.name || c.phone}</strong>
                         <span>{c.phone}</span>
                       </button>
-                      <button
-                        className="button"
-                        onClick={() =>
-                          setSelectedCustomer(
-                            selectedCustomer?.id === c.id ? null : c,
-                          )
-                        }
-                      >
-                        Reasignează
-                      </button>
+                      {(user.role === "manager" || c.ownerId === user.id) && (
+                        <button
+                          className="button"
+                          onClick={() =>
+                            setSelectedCustomer(
+                              selectedCustomer?.id === c.id ? null : c,
+                            )
+                          }
+                        >
+                          Îl dau magazinului
+                        </button>
+                      )}
                     </div>
                   ))}
                   {portfolio.isSuccess && !customers.length && (
@@ -223,11 +227,13 @@ export default function Team({
                         <BriefcaseBusiness size={20} />
                         <span>
                           <strong>{o.product}</strong>
-                          <small>{c.name}</small>
+                          <small>{c.name || c.phone}</small>
                           <small>
                             {next
                               ? next.type + " · " + date(next.due)
-                              : "Fără pas următor"}
+                              : o.nextStep
+                                ? stepLabel(o.nextStep) + " · fără dată"
+                                : "Fără pas următor"}
                           </small>
                         </span>
                         <span className="tag">{stages[o.stage]}</span>
@@ -330,9 +336,12 @@ export default function Team({
       {task && (
         <FollowUpForm
           customerId={task.customerId}
-          customerName={
-            data.customers.find((c) => c.id === task.customerId)?.name ?? ""
-          }
+          customerName={customerLabel(
+            data.customers.find((c) => c.id === task.customerId) ?? {
+              name: "",
+              phone: "Client",
+            },
+          )}
           user={user}
           users={members}
           followUp={task}

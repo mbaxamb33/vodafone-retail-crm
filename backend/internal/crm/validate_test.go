@@ -52,7 +52,10 @@ func TestIDs(t *testing.T) {
 }
 
 func TestValidateVisit(t *testing.T) {
-	catalog := []CatalogItem{{Kind: "visit_reason", Code: "support"}, {Kind: "product_category", Code: "mobile"}}
+	catalog := []CatalogItem{{Kind: "visit_reason", Code: "support"}, {Kind: "product_category", Code: "mobile"},
+		{Kind: "next_action", Code: "none"}, {Kind: "next_action", Code: "other"}, {Kind: "next_action", Code: "thinking"}}
+	const today = "2026-09-28"
+	other := func(status string) *ResolutionInput { return &ResolutionInput{Type: "other", Status: status} }
 	cases := []struct {
 		name  string
 		in    VisitInput
@@ -60,25 +63,42 @@ func TestValidateVisit(t *testing.T) {
 	}{
 		{"no steps", VisitInput{}, "steps"},
 		{"step out of range", VisitInput{Steps: []int{8}}, "steps"},
-		{"duplicate step", VisitInput{Steps: []int{1, 1}}, "steps"},
+		{"duplicate step", VisitInput{Steps: []int{2, 2}}, "steps"},
 		{"unknown reason", VisitInput{Steps: []int{0}, ReasonCode: "x"}, "reasonCode"},
-		{"next action without date", VisitInput{Steps: []int{0}, NextAction: "Call", Due: "2026-02-30"}, "due"},
-		{"bad ownership", VisitInput{Steps: []int{0}, Ownership: "mine"}, "ownership"},
+		{"unknown next action", VisitInput{Steps: []int{0}, NextAction: "Sună clientul"}, "nextAction"},
+		{"other without details", VisitInput{Steps: []int{0}, NextAction: "other"}, "actionDetails"},
+		{"agreed date missing", VisitInput{Steps: []int{0}, AgreedDate: true, Due: "2026-02-30"}, "due"},
+		{"agreed date in the past", VisitInput{Steps: []int{0}, AgreedDate: true, Due: "2026-09-27"}, "due"},
+		{"resolution step without details", VisitInput{Steps: []int{0, 1}}, "resolution"},
+		{"details without resolution step", VisitInput{Steps: []int{0}, Resolution: other("resolved")}, "resolution"},
+		{"invoice without holder", VisitInput{Steps: []int{1}, Resolution: &ResolutionInput{Type: "invoice"}}, "resolution.holder"},
+		{"other without status", VisitInput{Steps: []int{1}, Resolution: other("")}, "resolution.status"},
+		{"unknown request type", VisitInput{Steps: []int{1}, Resolution: &ResolutionInput{Type: "sale"}}, "resolution.type"},
+		{"reminder for resolved request", VisitInput{Steps: []int{1}, Resolution: other("resolved"), Reminder: &ReminderInput{Due: today, Notes: "x"}}, "reminder"},
+		{"reminder in the past", VisitInput{Steps: []int{1}, Resolution: other("pending"), Reminder: &ReminderInput{Due: "2026-09-01", Notes: "x"}}, "reminder.due"},
+		{"reminder without notes", VisitInput{Steps: []int{1}, Resolution: other("unresolved"), Reminder: &ReminderInput{Due: today}}, "reminder.notes"},
+		{"visit cannot return to pool", VisitInput{Steps: []int{0}, Ownership: "pool"}, "ownership"},
 		{"empty product", VisitInput{Steps: []int{0}, Opportunities: []OpportunityDraft{{Product: " "}}}, "opportunities.0.product"},
 		{"unknown category", VisitInput{Steps: []int{0}, Opportunities: []OpportunityDraft{{Product: "X", Category: "tv"}}}, "opportunities.0.category"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := validateVisit(&c.in, catalog)
+			err := validateVisit(&c.in, catalog, today)
 			var e *apperr.Error
 			if !errors.As(err, &e) || e.Fields[c.field] == "" {
 				t.Fatalf("want field error on %s, got %v", c.field, err)
 			}
 		})
 	}
-	ok := VisitInput{Steps: []int{6, 4}, ReasonCode: "support", Ownership: "keep", Opportunities: []OpportunityDraft{{Product: "Red", Category: "mobile"}}}
-	if err := validateVisit(&ok, catalog); err != nil {
+	ok := VisitInput{Steps: []int{6, 4, 1}, ReasonCode: "support", Ownership: "keep", NextAction: "thinking", AgreedDate: true, Due: today,
+		Resolution: other("pending"), Reminder: &ReminderInput{Due: "2026-10-28", Notes: "Verifică cazul"},
+		Opportunities: []OpportunityDraft{{Product: "Red", Category: "mobile"}}}
+	if err := validateVisit(&ok, catalog, today); err != nil {
 		t.Fatal(err)
+	}
+	bare := VisitInput{Steps: []int{0}, NextAction: "", Due: "2026-10-01"}
+	if err := validateVisit(&bare, catalog, today); err != nil || bare.NextAction != "none" || bare.Due != "" {
+		t.Fatalf("defaults: %v %+v", err, bare)
 	}
 }
 

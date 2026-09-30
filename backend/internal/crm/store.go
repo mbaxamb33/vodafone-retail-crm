@@ -30,6 +30,11 @@ type Reader interface {
 
 	Audit(ctx context.Context, storeID string, f AuditFilter) ([]Audit, error)
 	Notifications(ctx context.Context, storeID, userID string, unreadOnly bool, limit int) ([]Notification, int, error)
+	NotifiedSince(ctx context.Context, storeID, userID, kind string, since time.Time) (bool, error)
+
+	// ExperienceTasks lists the distinct customers an employee visited on each store-local day
+	// in [from, to) with their check status (open when never updated).
+	ExperienceTasks(ctx context.Context, storeID, employeeID, timezone, from, to string) ([]ExperienceTask, error)
 
 	ReportCounts(ctx context.Context, storeID string, r TimeRange, today string) (ReportCounts, error)
 	EmployeeCounts(ctx context.Context, storeID string, r TimeRange, today string) ([]EmployeeCounts, error)
@@ -55,17 +60,20 @@ type Tx interface {
 	InsertAudit(ctx context.Context, a Audit) error
 	InsertNotification(ctx context.Context, n Notification) error
 	MarkNotificationsRead(ctx context.Context, storeID, userID string, ids []string, at time.Time) error
+	SetExperienceStatus(ctx context.Context, storeID string, t ExperienceTask, at time.Time) error
 }
 
 type CustomerFilter struct {
-	Query     string // name fragment or phone
-	Phone     string // normalized phone fragment derived from Query
-	OwnerID   string
-	Ownership string
-	Status    string // empty means active and archived, never anonymized unless requested
-	Sort      string // recent, name, newest, followup
-	Offset    int
-	Limit     int
+	Query string // name fragment or phone
+	Phone string // normalized phone fragment derived from Query
+	// ExactPhone matches a full normalized number, used to warn about existing customers.
+	ExactPhone string
+	OwnerID    string
+	Ownership  string
+	Status     string // empty means active and archived, never anonymized unless requested
+	Sort       string // recent, name, newest, followup
+	Offset     int
+	Limit      int
 }
 
 type VisitFilter struct {

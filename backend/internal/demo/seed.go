@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -102,13 +103,20 @@ func Seed(ctx context.Context, db *postgres.DB, authSvc *auth.Service, password 
 			return fmt.Errorf("customer %s: %w", p.name, err)
 		}
 		at = at.Add(4 * time.Minute)
-		in := crm.VisitInput{ReasonCode: p.reason, Steps: p.steps, Notes: p.notes, Ownership: p.ownership}
+		in := crm.VisitInput{ReasonCode: p.reason, Steps: p.steps, Notes: p.notes, Resolution: resolutionFor(p.reason, p.steps)}
+		if p.ownership == crm.OwnershipOwned {
+			in.Ownership = crm.OwnershipOwned
+		}
 		if p.product != "" {
 			value := p.value
 			in.Opportunities = []crm.OpportunityDraft{{Product: p.product, Category: p.category, EstimatedValue: &value}}
 		}
 		if p.nextAction != "" {
-			in.NextAction, in.Due = p.nextAction, dueIn(p.due)
+			action := demoActions[p.nextAction]
+			in.NextAction, in.ActionDetails, in.AgreedDate, in.Due = action[0], action[1], true, dueIn(p.due)
+		}
+		if in.Resolution != nil && in.Resolution.Status == "pending" {
+			in.Reminder = &crm.ReminderInput{Due: dueIn(p.due + 10), Notes: "S-a rezolvat problema tehnică?"}
 		}
 		res, err := svc.RecordVisit(ctx, p.by, c.ID, in)
 		if err != nil {
@@ -122,19 +130,24 @@ func Seed(ctx context.Context, db *postgres.DB, authSvc *auth.Service, password 
 		}
 		if p.returnVisit != nil {
 			at = moment(p.daysAgo-7, 16)
-			if _, err := svc.RecordVisit(ctx, p.by, c.ID, crm.VisitInput{ReasonCode: p.reason, Steps: p.returnVisit, Notes: "A revenit pentru a continua discuția."}); err != nil {
+			if _, err := svc.RecordVisit(ctx, p.by, c.ID, crm.VisitInput{ReasonCode: p.reason, Steps: p.returnVisit, Notes: "A revenit pentru a continua discuția.", Resolution: resolutionFor(p.reason, p.returnVisit)}); err != nil {
 				return fmt.Errorf("return visit %s: %w", p.name, err)
 			}
 		}
 	}
 
-	// A manager reassignment and a colleague visit, so notifications and audit have variety.
+	// A customer returned to the pool and claimed by a colleague, and a colleague visit, so
+	// notifications and audit have variety.
 	at = moment(3, 11)
 	page, err := svc.ListCustomers(ctx, elena, crm.CustomerFilter{Query: "Maria Dobre", Limit: 1})
 	if err != nil || len(page.Items) == 0 {
 		return fmt.Errorf("find reassignment customer: %w", err)
 	}
-	if _, err := svc.ChangeOwnership(ctx, elena, page.Items[0].ID, crm.OwnershipInput{Ownership: crm.OwnershipOwned, OwnerID: ioana.ID}); err != nil {
+	if _, err := svc.ChangeOwnership(ctx, andrei, page.Items[0].ID, crm.OwnershipInput{Ownership: crm.OwnershipPool}); err != nil {
+		return err
+	}
+	at = at.Add(time.Hour)
+	if _, err := svc.ChangeOwnership(ctx, ioana, page.Items[0].ID, crm.OwnershipInput{Ownership: crm.OwnershipOwned}); err != nil {
 		return err
 	}
 	at = moment(1, 15)
@@ -142,6 +155,30 @@ func Seed(ctx context.Context, db *postgres.DB, authSvc *auth.Service, password 
 	if err != nil || len(page.Items) == 0 {
 		return fmt.Errorf("find colleague visit customer: %w", err)
 	}
-	_, err = svc.RecordVisit(ctx, andrei, page.Items[0].ID, crm.VisitInput{ReasonCode: "support", Steps: []int{0, 1}, Notes: "A trecut pentru o problemă de roaming; Ioana are discuția comercială."})
+	_, err = svc.RecordVisit(ctx, andrei, page.Items[0].ID, crm.VisitInput{ReasonCode: "support", Steps: []int{0, 1}, Notes: "A trecut pentru o problemă de roaming; Ioana are discuția comercială.",
+		Resolution: &crm.ResolutionInput{Type: "other", Status: "resolved"}})
 	return err
+}
+
+// demoActions maps the demo's next steps to catalog codes and details.
+var demoActions = map[string][2]string{
+	"Discută oferta":          {"thinking", ""},
+	"Verifică eligibilitatea": {"other", "Verificăm eligibilitatea la adresa nouă"},
+	"Clientul revine":         {"thinking", ""},
+	"Sună clientul":           {"keep_in_touch", ""},
+	"Pregătește oferta":       {"other", "Pregătim oferta pentru telefon"},
+}
+
+// resolutionFor describes the request whenever the request-resolution step was performed.
+func resolutionFor(reason string, steps []int) *crm.ResolutionInput {
+	if !slices.Contains(steps, crm.ResolutionStep) {
+		return nil
+	}
+	switch reason {
+	case "billing":
+		return &crm.ResolutionInput{Type: "invoice", Holder: "holder"}
+	case "technical_issue", "internet":
+		return &crm.ResolutionInput{Type: "other", Status: "pending"}
+	}
+	return &crm.ResolutionInput{Type: "other", Status: "resolved"}
 }

@@ -17,7 +17,8 @@ func validateCustomer(name, phone *string, tags *[]string) error {
 	f := apperr.Fields{}
 	if name != nil {
 		*name = cleanText(*name)
-		f.Check(lengthBetween(*name, 2, 120), "name", "Introdu un nume între 2 și 120 de caractere.")
+		// The phone number identifies the customer; a name is optional.
+		f.Check(lengthBetween(*name, 0, 120), "name", "Numele poate avea cel mult 120 de caractere.")
 	}
 	if phone != nil {
 		*phone = NormalizePhone(*phone)
@@ -135,6 +136,11 @@ func (s *Service) AnonymizeCustomer(ctx context.Context, actor User, id string) 
 
 func (s *Service) ListCustomers(ctx context.Context, actor User, f CustomerFilter) (Page[Customer], error) {
 	f.Offset, f.Limit = clampPage(f.Offset, f.Limit, 24, 100)
+	if f.ExactPhone != "" {
+		if f.ExactPhone = NormalizePhone(f.ExactPhone); !ValidPhone(f.ExactPhone) {
+			return Page[Customer]{}, apperr.Validation(map[string]string{"phone": "Număr de telefon invalid."})
+		}
+	}
 	f.Query = cleanText(f.Query)
 	f.Phone = PhoneSearchFragment(f.Query)
 	f.Query = FoldName(f.Query)
@@ -232,39 +238,41 @@ func (s *Service) ChangeOwnership(ctx context.Context, actor User, id string, in
 	return out, err
 }
 
-// changeOwnership applies an ownership change to a locked customer. It never creates a visit,
-// changes the last interaction or moves existing tasks.
+// changeOwnership applies an ownership change to a locked customer. Customers are claimed only
+// from the store pool, by the signed-in user for themselves. Only the owner, or a user with
+// PermReturnToPool, returns a customer to the pool. Nobody hands a customer directly to a
+// colleague. It never creates a visit, changes the last interaction or moves existing tasks.
 func (s *Service) changeOwnership(ctx context.Context, tx Tx, actor User, c *Customer, in OwnershipInput) error {
 	if c.Status == CustomerAnonymized {
 		return apperr.ErrConflict
 	}
-	owner := in.OwnerID
 	switch in.Ownership {
 	case OwnershipOwned:
-		if owner == "" {
-			owner = actor.ID
-		}
-		if !ValidID(owner) {
-			return apperr.ErrEmployeeNotFound
-		}
-		if _, err := s.member(ctx, tx, actor, owner); err != nil {
-			return err
-		}
-		if owner != actor.ID && !actor.Can(PermAssignAnyone) {
+		if in.OwnerID != "" && in.OwnerID != actor.ID {
 			return apperr.ErrForbidden
 		}
-	case OwnershipPool, OwnershipUnassigned:
-		if owner != "" {
+		if c.OwnerID == actor.ID {
+			return nil
+		}
+		if c.OwnerID != "" {
+			return apperr.ErrCustomerAlreadyOwned
+		}
+	case OwnershipPool:
+		if in.OwnerID != "" {
 			return apperr.Validation(map[string]string{"ownerId": "Un client din portofoliul magazinului nu are responsabil."})
 		}
+		if c.Ownership == OwnershipPool {
+			return nil
+		}
+		if c.OwnerID != "" && c.OwnerID != actor.ID && !actor.Can(PermReturnToPool) {
+			return apperr.ErrForbidden
+		}
 	default:
-		return apperr.Validation(map[string]string{"ownership": "Alege cine preia clientul."})
+		return apperr.Validation(map[string]string{"ownership": "Poți prelua un client din portofoliul magazinului sau îl poți returna magazinului."})
 	}
-	if c.OwnerID != "" && c.OwnerID != actor.ID && !actor.Can(PermAssignAnyone) {
-		return apperr.ErrForbidden
-	}
-	if c.OwnerID == owner && c.Ownership == in.Ownership {
-		return nil
+	owner := ""
+	if in.Ownership == OwnershipOwned {
+		owner = actor.ID
 	}
 	now := s.clock()
 	previousOwner, previousOwnership := c.OwnerID, c.Ownership
@@ -273,11 +281,8 @@ func (s *Service) changeOwnership(ctx context.Context, tx Tx, actor User, c *Cus
 		return err
 	}
 	notify := []Notice{}
-	if owner != "" {
-		notify = append(notify, Notice{UserID: owner, Kind: "customer_assigned", Message: "Ți-a fost alocat un client."})
-	}
 	if previousOwner != "" && previousOwner != owner {
-		notify = append(notify, Notice{UserID: previousOwner, Kind: "customer_reassigned", Message: "Un client din portofoliul tău a fost realocat."})
+		notify = append(notify, Notice{UserID: previousOwner, Kind: "customer_reassigned", Message: "Un client din portofoliul tău a fost returnat magazinului."})
 	}
 	return s.emit(ctx, tx, actor, now, Event{
 		Action: "customer.owner_changed", EntityType: "customer", EntityID: c.ID, CustomerID: c.ID,
@@ -285,6 +290,30 @@ func (s *Service) changeOwnership(ctx context.Context, tx Tx, actor User, c *Cus
 		Data:   map[string]any{"fromOwnership": previousOwnership, "fromOwnerId": previousOwner, "toOwnership": in.Ownership, "toOwnerId": owner},
 		Notify: notify,
 	})
+}
+
+// ReleasePortfolio returns every customer owned by user to the store pool, for example when the
+// account is disabled. Each change is audited with the user as actor.
+func (s *Service) ReleasePortfolio(ctx context.Context, user User) (int, error) {
+	released := 0
+	err := s.store.InTx(ctx, func(tx Tx) error {
+		owned, _, err := tx.Customers(ctx, user.StoreID, CustomerFilter{OwnerID: user.ID, Limit: 100000})
+		if err != nil {
+			return err
+		}
+		for _, c := range owned {
+			locked, err := tx.LockCustomer(ctx, user.StoreID, c.ID)
+			if err != nil {
+				return err
+			}
+			if err := s.changeOwnership(ctx, tx, user, &locked, OwnershipInput{Ownership: OwnershipPool}); err != nil {
+				return err
+			}
+			released++
+		}
+		return nil
+	})
+	return released, err
 }
 
 func ownershipDetail(ownership string) string {

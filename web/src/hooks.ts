@@ -12,6 +12,13 @@ export function useDebounced<T>(value: T, delay = 250) {
   return debounced;
 }
 
+// nextStepLabel shows the step agreed with the customer for an opportunity without a date.
+export function useNextStepLabel() {
+  const catalog = useCatalog();
+  return (code: string) =>
+    catalog.data?.nextActions.find((a) => a.code === code)?.label ?? code;
+}
+
 // Visit reasons, next actions and product categories are configured on the server.
 export function useCatalog() {
   return useQuery({

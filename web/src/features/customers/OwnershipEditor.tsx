@@ -14,7 +14,7 @@ export default function OwnershipEditor({
   onSaved?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [target, setTarget] = useState(customer.ownerId || customer.ownership);
+  const [target, setTarget] = useState(customer.ownerId ? "pool" : user.id);
   const qc = useQueryClient();
   const save = useMutation({
     mutationFn: () =>
@@ -28,10 +28,11 @@ export default function OwnershipEditor({
       onSaved?.();
     },
   });
+  // Customers are claimed only from the pool. Only the owner, or a manager, returns one.
   const canEdit =
-    user.role === "manager" ||
     !customer.ownerId ||
-    customer.ownerId === user.id;
+    customer.ownerId === user.id ||
+    user.role === "manager";
   const label = customer.ownerId
     ? (users.find((u) => u.id === customer.ownerId)?.name ??
       "Colegul responsabil")
@@ -49,14 +50,20 @@ export default function OwnershipEditor({
           <button
             className="button subtle"
             onClick={() => {
-              setTarget(customer.ownerId || customer.ownership);
+              setTarget(customer.ownerId ? "pool" : user.id);
               setEditing(true);
             }}
           >
-            {customer.ownerId ? "Schimbă" : "Alocă un responsabil"}
+            {customer.ownerId ? "Îl dau magazinului" : "Îl iau eu"}
           </button>
         )}
       </div>
+      {!canEdit && (
+        <p className="form-hint">
+          Doar responsabilul sau managerul poate returna acest client
+          magazinului. Poți înregistra vizite fără să preiei relația.
+        </p>
+      )}
       {editing && (
         <form
           onSubmit={(e) => {
@@ -78,16 +85,11 @@ export default function OwnershipEditor({
             value={target}
             onChange={(e) => setTarget(e.target.value)}
           >
-            {users
-              .filter((u) => user.role === "manager" || u.id === user.id)
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.id === user.id ? "Îl iau eu — " : ""}
-                  {u.name}
-                </option>
-              ))}
-            <option value="pool">Îl dau magazinului</option>
-            <option value="unassigned">Fără urmărire activă</option>
+            {customer.ownerId ? (
+              <option value="pool">Îl dau magazinului</option>
+            ) : (
+              <option value={user.id}>Îl iau eu — {user.name}</option>
+            )}
           </select>
           <p className="form-hint">
             Schimbarea responsabilului nu creează o vizită și nu transferă

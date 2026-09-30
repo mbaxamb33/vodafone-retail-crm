@@ -1,3 +1,4 @@
+import Experience from "./features/experience/Experience";
 import MobileNavigation from "./components/MobileNavigation";
 import Brand, { BrandMark } from "./components/Brand";
 import { Avatar, Empty } from "./components/ui";
@@ -51,6 +52,7 @@ import type { z } from "zod";
 const nav = [
   ["/", "Astăzi", Home],
   ["/customers", "Clienți", Users],
+  ["/store-pool", "Clienții magazinului", Store],
   ["/portfolio", "Portofoliul meu", BriefcaseBusiness],
   ["/pipeline", "Oportunități", ChartNoAxesCombined],
   ["/followups", "Follow-up-uri", CalendarDays],
@@ -363,9 +365,9 @@ export default function App() {
                     {searchResults.data.items.map((c) => (
                       <div className="search-result-row" key={c.id}>
                         <button onClick={() => showCustomer(c.id)}>
-                          <Avatar name={c.name} small />
+                          <Avatar name={c.name || c.phone} small />
                           <div>
-                            <strong>{c.name}</strong>
+                            <strong>{c.name || c.phone}</strong>
                             <small>{c.phone}</small>
                           </div>
                           <ChevronRight size={17} />
@@ -511,6 +513,11 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    <Experience
+                      onOpen={showCustomer}
+                      data={data}
+                      userId={user.id}
+                    />
                     <div className="dashboard-columns">
                       <div>
                         <section className="card work-card">
@@ -541,14 +548,19 @@ export default function App() {
                             )!;
                             return (
                               <div className="task-row" key={f.id}>
-                                <Avatar name={c.name} />
+                                <Avatar name={c.name || c.phone} />
                                 <button
                                   className="task-main"
                                   onClick={() => showCustomer(c.id)}
                                 >
-                                  <strong>{c.name}</strong>
+                                  <strong>{c.name || c.phone}</strong>
                                   <span>
-                                    {f.type}{" "}
+                                    {f.type}
+                                    {f.notes && (
+                                      <small className="reminder-context">
+                                        {f.notes}
+                                      </small>
+                                    )}{" "}
                                     <span className="separator">·</span>{" "}
                                     {data.opportunities.find(
                                       (o) => o.customerId === c.id,
@@ -599,10 +611,10 @@ export default function App() {
                                 onClick={() => showCustomer(c.id)}
                               >
                                 <div>
-                                  <Avatar name={c.name} />
+                                  <Avatar name={c.name || c.phone} />
                                   <ArrowUpRight size={17} />
                                 </div>
-                                <h3>{c.name}</h3>
+                                <h3>{c.name || c.phone}</h3>
                                 <p>{c.phone}</p>
                                 <span className="tag">
                                   {c.tags[0] ?? "Client nou"}
@@ -684,11 +696,15 @@ export default function App() {
                     </div>
                   </>
                 )}
-                {(page === "/customers" || page === "/portfolio") && (
+                {(page === "/customers" ||
+                  page === "/portfolio" ||
+                  page === "/store-pool") && (
                   <CustomerList
                     data={data}
                     user={user}
+                    key={page}
                     portfolio={page === "/portfolio"}
+                    pool={page === "/store-pool"}
                     onOpen={showCustomer}
                     onCreate={() => {
                       setInitialPhone("");
@@ -793,6 +809,10 @@ export default function App() {
         <CreateCustomer
           initialPhone={initialPhone}
           onClose={() => setCreate(false)}
+          onOpenExisting={(id) => {
+            setCreate(false);
+            showCustomer(id);
+          }}
           onSaved={(c) => {
             setCreate(false);
             setSelected(c.id);

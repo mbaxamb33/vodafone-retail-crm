@@ -65,40 +65,48 @@ Lists return a page: `{ "items": [...], "total": 42, "offset": 0, "limit": 24 }`
 
 ### Customers and visits
 
-| Method | Path                        | Notes                                                                                                                                                                                                                                                                                                 |
-| ------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/customers`                | `q` (name without diacritics, or a phone fragment in any common format), `owner` (`me` or a user ID), `ownership` (`owned`, `pool`, `unassigned`), `status` (`active`, `archived`), `sort` (`recent`, `name`, `newest`, `followup`), `offset`, `limit` (≤100). Anonymized customers are never listed. |
-| POST   | `/customers`                | `{ "name", "phone", "tags"? }` → 201. Phones are normalized to E.164 (`0722 345 678` becomes `+40722345678`). Shared numbers are allowed. New customers start in the store pool.                                                                                                                      |
-| GET    | `/customers/{id}?offset=`   | `{ customer, lastVisit, visits (20, newest first), total, followUps, opportunities, ownershipHistory, audit }`. `audit` (latest 50) is empty unless the caller is a manager.                                                                                                                          |
-| PATCH  | `/customers/{id}`           | Any of `name`, `phone`, `tags`, `status` (`active`/`archived`; managers only). Editable by the owner, by anyone while the customer is unowned, or by managers.                                                                                                                                        |
-| POST   | `/customers/{id}/ownership` | `{ "ownership": "owned", "ownerId"? }` (defaults to the caller), or `{ "ownership": "pool" }` / `{ "ownership": "unassigned" }`. Employees may only claim unowned customers or release their own; managers may assign any store member.                                                               |
-| POST   | `/customers/{id}/anonymize` | Managers only. Irreversible: clears the name, phone, tags and all free-text notes; counts and stages remain.                                                                                                                                                                                          |
-| GET    | `/customers/{id}/visits`    | Paginated visit history.                                                                                                                                                                                                                                                                              |
-| POST   | `/customers/{id}/visits`    | The visit request below. → 201 `{ visit, opportunities, followUp, customer }`, all saved in one transaction.                                                                                                                                                                                          |
-| PATCH  | `/visits/{id}`              | `{ "notes" }`. The author may edit within 7 days, managers at any time. The previous text is kept as a revision and the edit is audited.                                                                                                                                                              |
+| Method | Path                        | Notes                                                                                                                                                                                                                                                                                                                                                                    |
+| ------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/customers`                | `phone` (exact number in any format, used to warn about existing customers), `q` (name without diacritics, or a phone fragment in any common format), `owner` (`me` or a user ID), `ownership` (`owned`, `pool`), `status` (`active`, `archived`), `sort` (`recent`, `name`, `newest`, `followup`), `offset`, `limit` (≤100). Anonymized customers are never listed.     |
+| POST   | `/customers`                | `{ "phone", "name"?, "tags"? }` → 201. The phone number identifies the customer; the name is optional and never generated. Phones are normalized to E.164 (`0722 345 678` becomes `+40722345678`). Shared numbers are allowed; the app warns first. New customers start in the store pool.                                                                               |
+| GET    | `/customers/{id}?offset=`   | `{ customer, lastVisit, visits (20, newest first), total, followUps, opportunities, ownershipHistory, audit }`. `audit` (latest 50) is empty unless the caller is a manager.                                                                                                                                                                                             |
+| PATCH  | `/customers/{id}`           | Any of `name`, `phone`, `tags`, `status` (`active`/`archived`; managers only). Editable by the owner, by anyone while the customer is unowned, or by managers.                                                                                                                                                                                                           |
+| POST   | `/customers/{id}/ownership` | `{ "ownership": "owned" }` claims a pool customer for the caller; `{ "ownership": "pool" }` returns one. Nobody hands a customer directly to someone else (403). Claiming a colleague's customer returns `409 CUSTOMER_ALREADY_OWNED`. Only the owner or a manager returns a customer to the pool. `crmctl deactivate-user` returns that person's customers to the pool. |
+| POST   | `/customers/{id}/anonymize` | Managers only. Irreversible: clears the name, phone, tags and all free-text notes; counts and stages remain.                                                                                                                                                                                                                                                             |
+| GET    | `/customers/{id}/visits`    | Paginated visit history.                                                                                                                                                                                                                                                                                                                                                 |
+| POST   | `/customers/{id}/visits`    | The visit request below. → 201 `{ visit, opportunities, followUp, reminder, customer }`, all saved in one transaction.                                                                                                                                                                                                                                                   |
+| PATCH  | `/visits/{id}`              | `{ "notes" }`. The author may edit within 7 days, managers at any time. The previous text is kept as a revision and the edit is audited.                                                                                                                                                                                                                                 |
 
 Visit request:
 
 ```json
 {
-  "reasonCode": "renewal",
-  "steps": [0, 3, 4],
+  "reasonCode": "billing",
+  "steps": [0, 1, 3],
   "notes": "Revine după salariu.",
   "ownership": "owned",
-  "nextAction": "Sună clientul",
-  "due": "2026-10-01",
+  "resolution": { "type": "other", "status": "pending" },
+  "reminder": { "due": "2026-10-30", "notes": "S-a rezolvat cazul?" },
+  "nextAction": "thinking",
+  "actionDetails": "",
+  "agreedDate": false,
+  "due": "",
   "opportunities": [
     { "product": "Red Unlimited", "category": "mobile", "estimatedValue": 65 }
   ]
 }
 ```
 
-- `steps`: required, distinct journey indices 0–7, stored as given. Missing steps are never inferred. `furthestStep` is derived.
+- `steps`: required, distinct journey indices 0–7, stored as given. Missing steps are never inferred. `furthestStep` is derived. Step 3 is "Atragerea intenției comerciale".
+- `resolution`: required when step 1 (Rezolvarea solicitării) was performed, and rejected otherwise. `{ "type": "invoice", "holder": "holder" | "other" }` (titular / netitular) or `{ "type": "other", "status": "resolved" | "unresolved" | "pending" }` (pending means a case is open).
+- `reminder`: optional internal check, allowed only for an unresolved or pending other request. It needs a date from today on and a note, and creates a follow-up of kind `reminder` for the caller. It is not a date agreed with the customer.
+- `nextAction`: the step agreed with the customer, a `next_action` catalog code: `none`, `thinking`, `consulting`, `comparing`, `not_interested`, `keep_in_touch`, `other`. Empty means `none`. `other` requires `actionDetails` (≤500 characters). `keep_in_touch` records contact consent on the visit, with its author and time in the audit log; it is not a general marketing permission.
+- `agreedDate`: true only when a date was agreed with the customer. `due` is then required and cannot be in the past, and a follow-up of kind `agreed` is created. Without an agreed date nothing is scheduled, but the step is kept on the visit and on any new opportunity (`nextStep`).
 - `reasonCode`: optional; must be a `visit_reason` catalog code.
-- `ownership`: `keep` (the default), `owned`, `pool` or `unassigned`. It follows the same rules as the ownership endpoint.
-- `nextAction` (≤100 characters) needs a valid `due` and creates a follow-up for the caller.
-- `opportunities`: up to 5; each starts at `identified`. The follow-up is linked only when exactly one opportunity is created.
-- The visit updates the customer's last interaction and unarchives an archived customer. It notifies the owner when a colleague records it.
+- `ownership`: `keep` (the default) or `owned`, which claims a pool customer under the ownership rules above.
+- `opportunities`: up to 5; each starts at `identified`. The agreed follow-up is linked only when exactly one opportunity is created.
+- The visit updates the customer's last interaction, unarchives an archived customer and notifies the owner when a colleague records it.
+- Visits include `details: { nextAction, nextActionLabel, actionDetails, contactConsent, agreedDate, due, resolution }`. Visits recorded before this model have an empty `nextAction`.
 
 ### Follow-ups and opportunities
 
@@ -111,7 +119,20 @@ Visit request:
 | POST   | `/opportunities`      | `{ "customerId", "product", "category"?, "estimatedValue"?, "notes"?, "employeeId"? }` → 201.                                                                                                                                                              |
 | PATCH  | `/opportunities/{id}` | Any of `stage`, `product`, `category`, `estimatedValue`, `notes`. Allowed for the owner or a manager. Won and lost opportunities return `409 INVALID_STAGE_TRANSITION` for stage or detail changes. Repeating the current stage records no event.          |
 
+Follow-ups include `kind`: `agreed` (date agreed with the customer), `reminder` (internal check) or `task` (scheduled directly). An opportunity counts as having a next step when a follow-up is linked to it or its `nextStep` is set.
+
 Stages: `identified`, `qualified`, `verification`, `presentation`, `offer`, `waiting`, `won`, `lost`, `paused`. Opportunities include `stageChangedAt` (for stale detection), `closedAt` and `sourceVisitId`.
+
+### Experience follow-ups
+
+The day after serving a customer, each employee checks how the visit went.
+
+| Method | Path               | Notes                                                                                                                                                                                                                                       |
+| ------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/experience`      | `{ items: [{ id, customerId, employeeId, day, status }] }`: one task per customer and store-local visit day in the last 7 days, never today and never before the feature started in the store. `status` is `open`, `unreachable` or `done`. |
+| PATCH  | `/experience/{id}` | `{ "status" }`. `id` is `customerId:day`. `unreachable` keeps the task pending; `done` completes it and can be undone. Changes are audited.                                                                                                 |
+
+The first notifications request of a day creates one `experience` notification when checks are waiting.
 
 ### Notifications
 
