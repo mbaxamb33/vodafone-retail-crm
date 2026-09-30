@@ -179,11 +179,14 @@ export default function App() {
                 login.mutate();
               }}
             >
-              <label htmlFor="email">Email</label>
+              <label htmlFor="email">Utilizator</label>
               <input
                 id="email"
-                type="email"
+                type="text"
                 autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="prenume.nume"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}

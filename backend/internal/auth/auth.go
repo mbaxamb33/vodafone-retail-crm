@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -66,7 +67,19 @@ type Session struct {
 	Expires time.Time
 }
 
+// NormalizeEmail normalizes a login identifier: a username such as "oana.boboc" or an email.
 func NormalizeEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
+
+var usernamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$`)
+
+// ValidLogin accepts a normalized username or email address.
+func ValidLogin(login string) bool {
+	if usernamePattern.MatchString(login) {
+		return true
+	}
+	addr, err := mail.ParseAddress(login)
+	return err == nil && addr.Address == login
+}
 
 func tokenHash(token string) []byte {
 	h := sha256.Sum256([]byte(token))
@@ -202,8 +215,7 @@ type NewUser struct {
 func (s *Service) CreateUser(ctx context.Context, in NewUser) (crm.User, error) {
 	f := apperr.Fields{}
 	in.Email = NormalizeEmail(in.Email)
-	addr, err := mail.ParseAddress(in.Email)
-	f.Check(err == nil && addr.Address == in.Email, "email", "Email invalid.")
+	f.Check(ValidLogin(in.Email), "email", "Folosește un nume de utilizator (litere, cifre, punct, cratimă) sau o adresă de email.")
 	in.Name = strings.TrimSpace(in.Name)
 	f.Check(in.Name != "" && utf8.RuneCountInString(in.Name) <= 120, "name", "Nume invalid.")
 	f.Check(crm.ValidRole(in.Role), "role", "Rol invalid.")

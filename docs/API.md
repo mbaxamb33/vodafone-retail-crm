@@ -45,14 +45,14 @@ Lists return a page: `{ "items": [...], "total": 42, "offset": 0, "limit": 24 }`
 
 ### Session and reference data
 
-| Method | Path             | Notes                                                                                                                   |
-| ------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/auth/login`    | `{ "email", "password" }` → `{ user, store, features }`                                                                 |
-| POST   | `/auth/logout`   | Revokes the session.                                                                                                    |
-| GET    | `/auth/me`       | `{ user, store, features }`                                                                                             |
-| POST   | `/auth/password` | `{ "currentPassword", "newPassword" }` (at least 10 characters). Revokes the user's other sessions.                     |
-| GET    | `/catalog`       | `{ visitReasons, nextActions, productCategories, journeySteps, stages }`. Each catalog item is `{ kind, code, label }`. |
-| GET    | `/users`         | Active members of the store.                                                                                            |
+| Method | Path             | Notes                                                                                                                                                 |
+| ------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/auth/login`    | `{ "email", "password" }` → `{ user, store, features }`. `email` is the login: a username such as `oana.boboc` or an email address, case-insensitive. |
+| POST   | `/auth/logout`   | Revokes the session.                                                                                                                                  |
+| GET    | `/auth/me`       | `{ user, store, features }`                                                                                                                           |
+| POST   | `/auth/password` | `{ "currentPassword", "newPassword" }` (at least 10 characters). Revokes the user's other sessions.                                                   |
+| GET    | `/catalog`       | `{ visitReasons, nextActions, productCategories, journeySteps, stages }`. Each catalog item is `{ kind, code, label }`.                               |
+| GET    | `/users`         | Active members of the store.                                                                                                                          |
 
 ### Workspace and dashboards
 

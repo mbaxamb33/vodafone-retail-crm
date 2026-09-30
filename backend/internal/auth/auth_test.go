@@ -97,3 +97,22 @@ func upper(s string) string { return strings.ToUpper(s) }
 func newUser(storeID, email string) auth.NewUser {
 	return auth.NewUser{StoreID: storeID, Email: email, Name: "Duplicate", Role: "employee", Password: pgtest.Password}
 }
+
+func TestUsernameLogin(t *testing.T) {
+	db := pgtest.New(t)
+	a := pgtest.FastAuth(db)
+	st := pgtest.NewStore(t, db, a, "Username Store")
+	ctx := context.Background()
+	u, err := a.CreateUser(ctx, auth.NewUser{StoreID: st.ID, Email: " Oana.Boboc ", Name: "Oana Boboc", Role: "employee", Password: pgtest.Password})
+	if err != nil || u.Email != "oana.boboc" {
+		t.Fatal("username account", err, u.Email)
+	}
+	if _, err := a.Login(ctx, "OANA.BOBOC", pgtest.Password, "10.0.0.9"); err != nil {
+		t.Fatal("username login should be case-insensitive:", err)
+	}
+	for _, bad := range []string{"", ".oana", "oana boboc", "oana@", "ana/../x"} {
+		if _, err := a.CreateUser(ctx, auth.NewUser{StoreID: st.ID, Email: bad, Name: "X", Role: "employee", Password: pgtest.Password}); !errors.Is(err, apperr.ErrValidation) {
+			t.Errorf("accepted invalid login %q", bad)
+		}
+	}
+}

@@ -34,7 +34,7 @@ Accounts are managed with the `crmctl` CLI. Passwords are read from `CRM_PASSWOR
 cd backend
 export DATABASE_URL=postgres://crm:crm@127.0.0.1:5434/crm?sslmode=disable
 go run ./cmd/crmctl create-store -name "Magazin Iași"             # prints the store ID
-go run ./cmd/crmctl create-user -store <id> -email ana@example.com -name "Ana Pop" -role employee
+go run ./cmd/crmctl create-user -store <id> -email ana.pop -name "Ana Pop" -role employee  # a username or an email
 go run ./cmd/crmctl reset-password -email ana@example.com          # revokes the user's sessions
 go run ./cmd/crmctl deactivate-user -email ana@example.com
 go run ./cmd/crmctl list-stores
